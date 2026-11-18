@@ -1,0 +1,3 @@
+# Guardar tal cual (finales de línea de Windows y BOM): .bat y PowerShell 5.1 los necesitan
+*.bat -text
+*.ps1 -text
