@@ -8,7 +8,7 @@ Herramientas para Windows pensadas para un PC corporativo (con VPN Cisco y Zscal
 | Carpeta | Doble clic (sin administrador) | Como administrador, además |
 | --- | --- | --- |
 | `Limpiar-Memoria` | Libera la RAM que no usan los programas de la lista (solo los de tu sesión). Muestra antes y después, cuánto soltó cada programa y qué usa más RAM ahora. | — |
-| `Optimizar-PC` | Borra temporales de más de 24 h, cachés de Chrome, Edge, Brave, Firefox y Teams (solo si están cerrados) y miniaturas. Ofrece vaciar la Papelera y corre el Liberador de espacio. Dice cuántos archivos y MB borró y cuántos estaban en uso. Revisa disco, memoria, días sin reiniciar, actualizaciones y programas de inicio habilitados. | Temporales de Windows, DISM, TRIM y desfragmentar. Solo para PC personal: informes de errores, historial, cookies y archivos recientes. |
+| `Optimizar-PC` | Borra temporales de más de 24 h, cachés de Chrome, Edge, Brave, Firefox y Teams (solo si están cerrados) y miniaturas. Ofrece vaciar la Papelera y corre el Liberador de espacio. Dice cuántos archivos y MB borró y cuántos estaban en uso. Revisa disco, TRIM del SSD, memoria, días sin reiniciar, actualizaciones y programas de inicio habilitados. | Temporales de Windows, DISM y optimizar discos. Solo para PC personal: informes de errores, historial, cookies y archivos recientes. |
 | `Optimizar-Internet` | Renueva la IP (solo si no hay VPN). Muestra IP, router, DNS y datos del Wi-Fi. Revisa los servicios DHCP y DNS, hace ping al router y a internet (sin VPN) y prueba el DNS. | Vacía las cachés DNS, NetBIOS y ARP, aplica los ajustes TCP, desactiva Teredo y fija el DNS. Si respondes **S**, hace la reparación profunda (firewall, IP, Winsock y proxy) y pide reiniciar. |
 | `Monitor-Memoria` | Ícono junto al reloj con el % de RAM en uso. Doble clic: liberar memoria. Clic derecho: limpieza automática al pasar de 85 %, Administrador de tareas y Salir. | — |
 
@@ -39,11 +39,11 @@ Todos siguen el mismo orden, de arriba abajo:
 1. **CHEQUEO INICIAL:** se detiene si PowerShell está restringido.
 2. **CONFIGURACIÓN:** lo que puedes cambiar sin tocar el resto. Por ejemplo, la lista `$Programas`, las horas mínimas de los temporales, los límites de los pings o tus ajustes TCP y DNS.
 3. **VISTA:** todo lo visual (títulos, colores y barras). Los demás métodos solo dicen el tipo de resultado (`ok`, `aviso`, `mal` o `info`), y la VISTA decide el color.
-4. **MÉTODOS REUTILIZABLES:** piezas que usan varias tareas, como `Borrar-Archivos`.
-5. **Tareas:** un método por tarea (`Limpiar-Temp`, `Probar-Dns`...). Las de administrador están en la sección MANTENIMIENTO.
+4. **MÉTODOS REUTILIZABLES:** piezas que usan varias tareas, como `Remove-OldFiles`.
+5. **Tareas:** un método por tarea (`Clear-Temp`, `Test-Dns`...). Las de administrador están en la sección MANTENIMIENTO.
 6. **MAIN:** al final; llama a las tareas en orden.
 
-Para agregar una limpieza, escribe un método nuevo de una línea con `Borrar-Archivos` y llámalo desde `Main`.
+Los nombres de los métodos están en inglés, con los verbos oficiales de PowerShell (`Get-`, `Show-`, `Clear-`, `Test-`...), para que VS Code no los marque con avisos. Comentarios y mensajes siguen en español. Para agregar una limpieza, escribe un método nuevo de una línea con `Remove-OldFiles` y llámalo desde `Main`.
 
 Dos cosas que hay que mantener iguales a mano, porque cada carpeta funciona sola:
 

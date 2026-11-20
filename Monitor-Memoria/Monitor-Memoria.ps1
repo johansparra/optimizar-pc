@@ -52,7 +52,7 @@ $TamIcono = [int](16 * $(if ($Dpi) { $Dpi } else { 96 }) / 96)
 $Fuente   = New-Object System.Drawing.Font('Segoe UI', [single]($TamIcono * 0.56), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
 
 # Título grande al abrir el script.
-function Escribir-Encabezado($texto) {
+function Write-Header($texto) {
     $Host.UI.RawUI.WindowTitle = $texto
     $linea = '═' * 62
     Write-Host ''
@@ -62,18 +62,18 @@ function Escribir-Encabezado($texto) {
 }
 
 # Una línea del reporte: qué se hizo a la izquierda, resultado a la derecha con el color de su tipo.
-function Escribir-Linea($nombre, $resultado, $tipo = 'normal') {
+function Write-Line($nombre, $resultado, $tipo = 'normal') {
     Write-Host ('   {0,-32} ' -f $nombre) -NoNewline   # el espacio final separa aunque el nombre sea largo
     Write-Host $resultado -ForegroundColor $Colores[$tipo]
 }
 
 # Color del ícono según el % de RAM.
-function Obtener-ColorIcono($pct) {
+function Get-IconColor($pct) {
     if ($pct -ge $PctRojo) { 'Firebrick' } elseif ($pct -ge $PctNaranja) { 'DarkOrange' } else { 'SeaGreen' }
 }
 
 # Cuadrito de esquinas redondeadas con el número en blanco.
-function Dibujar-Icono($pct) {
+function Get-Icon($pct) {
     if (-not $Iconos[$pct]) {
         $t = $TamIcono
         $bmp = New-Object System.Drawing.Bitmap($t, $t)
@@ -86,7 +86,7 @@ function Dibujar-Icono($pct) {
         $forma.AddArc($t - $d - 1, 0, $d, $d, 270, 90)
         $forma.AddArc($t - $d - 1, $t - $d - 1, $d, $d, 0, 90)
         $forma.AddArc(0, $t - $d - 1, $d, $d, 90, 90)
-        $g.FillPath((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromName((Obtener-ColorIcono $pct)))), $forma)
+        $g.FillPath((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromName((Get-IconColor $pct)))), $forma)
         $centrado = New-Object System.Drawing.StringFormat
         $centrado.Alignment = $centrado.LineAlignment = 'Center'
         $g.DrawString([string][math]::Min($pct, 99), $Fuente, [System.Drawing.Brushes]::White, (New-Object System.Drawing.RectangleF(0, 1, $t, $t)), $centrado)
@@ -96,34 +96,34 @@ function Dibujar-Icono($pct) {
 }
 
 # Menú del clic derecho.
-function Crear-Menu {
+function Initialize-Menu {
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
     $script:ItemEstado = $menu.Items.Add('RAM')
     $script:ItemEstado.Enabled = $false   # solo informa
     [void]$menu.Items.Add('-')
-    $liberar = $menu.Items.Add('Liberar memoria ahora', $null, { Liberar-Memoria 'Memoria liberada' })
+    $liberar = $menu.Items.Add('Liberar memoria ahora', $null, { Clear-Memory 'Memoria liberada' })
     $liberar.Font = New-Object System.Drawing.Font($liberar.Font, [System.Drawing.FontStyle]::Bold)
     $script:ItemAuto = $menu.Items.Add("Liberar sola al pasar de $PctAuto %")
     $script:ItemAuto.CheckOnClick = $true
     $script:ItemAuto.Checked = $AutoAlIniciar
     [void]$menu.Items.Add('Abrir Administrador de tareas', $null, { Start-Process taskmgr.exe })
     [void]$menu.Items.Add('-')
-    [void]$menu.Items.Add('Salir', $null, { Salir })
+    [void]$menu.Items.Add('Salir', $null, { Exit-Monitor })
     $Tray.ContextMenuStrip = $menu
 }
 
 # ════════ MÉTODOS REUTILIZABLES ════════
 
-function Obtener-PorcentajeRam {
+function Get-RamPercent {
     [int](100 - 100 * $Info.AvailablePhysicalMemory / $Info.TotalPhysicalMemory)
 }
 
-function Obtener-RamLibreMB {
+function Get-FreeRamMB {
     $Info.AvailablePhysicalMemory / 1MB
 }
 
 # Texto con el detalle, para el tooltip y el menú.
-function Obtener-DetalleRam {
+function Get-RamDetail {
     $total = $Info.TotalPhysicalMemory / 1GB
     $libre = $Info.AvailablePhysicalMemory / 1GB
     '{0:N1} de {1:N1} GB · libre {2:N1} GB' -f ($total - $libre), $total, $libre
@@ -131,54 +131,54 @@ function Obtener-DetalleRam {
 
 # Volver a fijar su propio límite hace que Windows le recorte la RAM que no está usando.
 # Solo los programas de la lista abiertos en tu sesión.
-function Liberar-RamProgramas {
+function Clear-ProgramsRam {
     Get-Process -Name $Programas -ErrorAction SilentlyContinue | Where-Object SessionId -eq $Sesion |
         ForEach-Object { try { $_.MaxWorkingSet = $_.MaxWorkingSet } catch {} }
 }
 
 # $true si ya hay otro monitor abierto (los dos usan el mismo candado).
-function Ya-EstaAbierto {
+function Test-AlreadyRunning {
     try { -not $Candado.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $false }   # el anterior se cerró mal
 }
 
 # ════════ ACCIONES (lo que pasa con cada evento) ════════
 
 # Cada X segundos
-function Actualizar-Icono {
-    $pct = Obtener-PorcentajeRam
-    $Tray.Icon = Dibujar-Icono $pct
-    $Tray.Text = "RAM en uso: $pct %`n$(Obtener-DetalleRam)"
-    $ItemEstado.Text = "RAM $pct % · $(Obtener-DetalleRam)"
+function Update-Icon {
+    $pct = Get-RamPercent
+    $Tray.Icon = Get-Icon $pct
+    $Tray.Text = "RAM en uso: $pct %`n$(Get-RamDetail)"
+    $ItemEstado.Text = "RAM $pct % · $(Get-RamDetail)"
 }
 
 # Cada X segundos: si la limpieza automática está activada y la RAM pasa de $PctAuto.
-function Revisar-LimpiezaAutomatica {
+function Invoke-AutoCleanup {
     $minutos = ((Get-Date) - $script:UltimaAuto).TotalMinutes
-    if ($ItemAuto.Checked -and (Obtener-PorcentajeRam) -ge $PctAuto -and $minutos -ge $MinutosEntreAuto) {
+    if ($ItemAuto.Checked -and (Get-RamPercent) -ge $PctAuto -and $minutos -ge $MinutosEntreAuto) {
         $script:UltimaAuto = Get-Date
-        Liberar-Memoria 'Limpieza automática de memoria'
+        Clear-Memory 'Limpieza automática de memoria'
     }
 }
 
-# Doble clic, "Liberar memoria ahora" o la limpieza automática. El resultado lo mide Avisar-Resultado
+# Doble clic, "Liberar memoria ahora" o la limpieza automática. El resultado lo mide Show-Result
 # 1,5 s después, sin congelar el ícono mientras tanto.
-function Liberar-Memoria($titulo) {
-    $script:LibreAntesMB = Obtener-RamLibreMB
+function Clear-Memory($titulo) {
+    $script:LibreAntesMB = Get-FreeRamMB
     $script:TituloAviso = $titulo
-    Liberar-RamProgramas
+    Clear-ProgramsRam
     $Espera.Start()
 }
 
 # 1,5 s después de liberar
-function Avisar-Resultado {
+function Show-Result {
     $Espera.Stop()
-    $liberado = [math]::Max(0, (Obtener-RamLibreMB) - $script:LibreAntesMB)
-    $Tray.ShowBalloonTip(4000, $script:TituloAviso, ('{0:N0} MB liberados. RAM en uso: {1} %' -f $liberado, (Obtener-PorcentajeRam)), 'Info')
-    Actualizar-Icono
+    $liberado = [math]::Max(0, (Get-FreeRamMB) - $script:LibreAntesMB)
+    $Tray.ShowBalloonTip(4000, $script:TituloAviso, ('{0:N0} MB liberados. RAM en uso: {1} %' -f $liberado, (Get-RamPercent)), 'Info')
+    Update-Icon
 }
 
 # Clic derecho > Salir
-function Salir {
+function Exit-Monitor {
     $Reloj.Stop()
     $Tray.Visible = $false
     [System.Windows.Forms.Application]::Exit()
@@ -188,30 +188,30 @@ function Salir {
 
 function Main {
     # 1. Primero: solo una copia abierta.
-    if (Ya-EstaAbierto) {
+    if (Test-AlreadyRunning) {
         [void][System.Windows.Forms.MessageBox]::Show('El monitor de memoria ya está abierto: búscalo junto al reloj (o en la flecha ^).', 'Monitor de memoria')
         return
     }
 
     # 2. Conectar el ícono, el menú y los relojes con sus acciones.
-    Crear-Menu
-    $Tray.Add_DoubleClick({ Liberar-Memoria 'Memoria liberada' })
+    Initialize-Menu
+    $Tray.Add_DoubleClick({ Clear-Memory 'Memoria liberada' })
     $Reloj.Interval = $SegundosEntreLecturas * 1000
-    $Reloj.Add_Tick({ Actualizar-Icono; Revisar-LimpiezaAutomatica })
+    $Reloj.Add_Tick({ Update-Icon; Invoke-AutoCleanup })
     $Espera.Interval = 1500
-    $Espera.Add_Tick({ Avisar-Resultado })
+    $Espera.Add_Tick({ Show-Result })
 
     # 3. Mostrar el ícono y arrancar el reloj.
-    Actualizar-Icono
+    Update-Icon
     $Tray.Visible = $true
     $Reloj.Start()
 
     # 4. Explicar en esta ventana cómo se usa, y esperar hasta que elijan Salir.
-    Escribir-Encabezado 'MONITOR DE MEMORIA'
-    Escribir-Linea 'Estado' 'activo: mira el ícono junto al reloj' 'ok'
-    Escribir-Linea 'Liberar memoria' 'doble clic en el ícono'
-    Escribir-Linea 'Más opciones' 'clic derecho en el ícono (limpieza automática, Salir...)'
-    Escribir-Linea 'Esta ventana' 'déjala minimizada; si la cierras, el monitor se cierra' 'info'
+    Write-Header 'MONITOR DE MEMORIA'
+    Write-Line 'Estado' 'activo: mira el ícono junto al reloj' 'ok'
+    Write-Line 'Liberar memoria' 'doble clic en el ícono'
+    Write-Line 'Más opciones' 'clic derecho en el ícono (limpieza automática, Salir...)'
+    Write-Line 'Esta ventana' 'déjala minimizada; si la cierras, el monitor se cierra' 'info'
     [System.Windows.Forms.Application]::Run()
     $Candado.ReleaseMutex()
 }
