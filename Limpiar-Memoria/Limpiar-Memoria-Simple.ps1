@@ -1,5 +1,13 @@
 ﻿# Limpiar-Memoria-Simple.ps1 - Libera la RAM que no usan los programas de la lista y muestra el antes y el después. Sin administrador.
-# Orden del archivo: CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
+# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
+
+# ════════ CHEQUEO INICIAL ════════
+
+# Si la empresa restringe PowerShell (modo de lenguaje restringido), avisar y no hacer nada.
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    Write-Host '   PowerShell está restringido en este equipo por política de la empresa: esta herramienta no se ejecuta aquí.' -ForegroundColor Red
+    return
+}
 
 # ════════ CONFIGURACIÓN ════════
 
@@ -54,6 +62,12 @@ function Obtener-RamLibreMB {
     (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB
 }
 
+# Los programas de la lista abiertos en TU sesión (no los de otros usuarios conectados al mismo PC).
+function Obtener-ProgramasDeTuSesion {
+    $sesion = (Get-Process -Id $PID).SessionId
+    @(Get-Process -Name $Programas -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sesion)
+}
+
 # Volver a fijar su propio límite hace que Windows le recorte la RAM que no está usando.
 # Devuelve $true si lo logró y $false si no hay permiso (programa abierto como administrador).
 function Liberar-RamProceso($proceso) {
@@ -69,14 +83,26 @@ function Mostrar-Memoria($momento) {
     Escribir-Barra $momento (100 * $usadaKB / $os.TotalVisibleMemorySize) ('{0:N1} GB de {1:N1} GB en uso' -f ($usadaKB / 1MB), ($os.TotalVisibleMemorySize / 1MB))
 }
 
-function Liberar-RamProgramas {
-    $limpiados = 0
-    $sinPermiso = 0
-    foreach ($proceso in (Get-Process -Name $Programas -ErrorAction SilentlyContinue)) {
-        if (Liberar-RamProceso $proceso) { $limpiados++ } else { $sinPermiso++ }
-    }
-    Escribir-Linea 'Procesos limpiados' $limpiados 'ok'
+# Libera la RAM de cada proceso, reporta cuántos lo lograron y devuelve esos procesos.
+function Liberar-RamProgramas($procesos) {
+    $limpiados = @($procesos | Where-Object { Liberar-RamProceso $_ })
+    Escribir-Linea 'Procesos limpiados' $limpiados.Count 'ok'
+    $sinPermiso = $procesos.Count - $limpiados.Count
     if ($sinPermiso) { Escribir-Linea 'Sin permiso' "$sinPermiso (abiertos como administrador)" 'info' }
+    $limpiados
+}
+
+# Cuánto soltó cada programa: la RAM que tenía al empezar (guardada en $procesos) contra la de ahora.
+function Mostrar-QuienSolto($procesos) {
+    $ahora = @{}
+    Get-Process | ForEach-Object { $ahora[$_.Id] = $_.WorkingSet64 }
+    Escribir-Linea 'Lo que soltó cada programa' ''
+    $procesos | Group-Object ProcessName | ForEach-Object {
+        $antesMB = ($_.Group | Measure-Object WorkingSet64 -Sum).Sum / 1MB
+        $ahoraMB = ($_.Group | ForEach-Object { [long]$ahora[$_.Id] } | Measure-Object -Sum).Sum / 1MB   # cerrado = 0
+        [pscustomobject]@{ Nombre = '{0} ({1})' -f $_.Name, $_.Count; Antes = $antesMB; Ahora = $ahoraMB; Solto = $antesMB - $ahoraMB }
+    } | Where-Object Solto -ge 1 | Sort-Object Solto -Descending | Select-Object -First 8 |
+        ForEach-Object { Escribir-Linea "  $($_.Nombre)" ('{0:N0} MB  (de {1:N0} a {2:N0} MB)' -f $_.Solto, $_.Antes, $_.Ahora) 'ok' }
 }
 
 function Mostrar-RamLiberada($libreAntesMB) {
@@ -98,17 +124,19 @@ function Mostrar-TopMemoria {
 function Main {
     Escribir-Encabezado 'LIMPIAR MEMORIA RAM'
     $libreAntes = Obtener-RamLibreMB
+    $procesos = Obtener-ProgramasDeTuSesion   # cada proceso guarda la RAM que tenía en este momento
 
     # 1. Antes, liberar, después.
     Escribir-Titulo 'Memoria'
     Mostrar-Memoria 'Antes'
-    Liberar-RamProgramas
+    $limpiados = Liberar-RamProgramas $procesos
     Start-Sleep -Seconds 2   # dar tiempo a Windows de actualizar sus contadores
     Mostrar-Memoria 'Después'
 
-    # 2. Cuánto se liberó y quién usa más ahora.
+    # 2. Cuánto se liberó, quién lo soltó y quién usa más ahora.
     Escribir-Titulo 'Resultado'
     Mostrar-RamLiberada $libreAntes
+    Mostrar-QuienSolto $limpiados
     Mostrar-TopMemoria
 
     Escribir-Titulo 'Listo'

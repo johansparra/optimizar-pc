@@ -1,6 +1,14 @@
 ﻿# Optimizar-PC-Simple.ps1 - Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo.
 # Doble clic: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows.
-# Orden del archivo: CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > REVISIÓN > LIMPIEZA > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > REVISIÓN > LIMPIEZA > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+
+# ════════ CHEQUEO INICIAL ════════
+
+# Si la empresa restringe PowerShell (modo de lenguaje restringido), avisar y no hacer nada.
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    Write-Host '   PowerShell está restringido en este equipo por política de la empresa: esta herramienta no se ejecuta aquí.' -ForegroundColor Red
+    return
+}
 
 # ════════ CONFIGURACIÓN ════════
 
@@ -53,27 +61,38 @@ function Escribir-Barra($nombre, $pct, $detalle) {
 
 # ════════ MÉTODOS REUTILIZABLES ════════
 
-# Borra los archivos (no las carpetas) con más de $horas de antigüedad y reporta cuántos y cuánto pesaban.
-# Los que están en uso se saltan solos.
+# Borra los archivos y las subcarpetas vacías con más de $horas de antigüedad, y reporta cuántos borró,
+# cuánto pesaban y cuántos estaban en uso. Los que están en uso se dejan.
 function Borrar-Archivos($nombre, $rutas, $horas = 0) {
     $limite = (Get-Date).AddHours(-$horas)
+    # La lista se toma antes de borrar: al borrar un archivo, su carpeta queda con fecha de ahora.
+    $viejos = @(Get-Item $rutas -Force -ErrorAction SilentlyContinue |
+        Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object LastWriteTime -lt $limite)
     $archivos = 0
     $bytes = 0
-    Get-Item $rutas -Force -ErrorAction SilentlyContinue |
-        Get-ChildItem -Recurse -Force -File -ErrorAction SilentlyContinue |
-        Where-Object LastWriteTime -lt $limite |
-        ForEach-Object {
-            try {
-                $tamano = $_.Length
-                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
-                $archivos++
-                $bytes += $tamano
-            } catch {}   # en uso: se deja
-        }
+    $enUso = 0
+    foreach ($archivo in ($viejos | Where-Object { -not $_.PSIsContainer })) {
+        try {
+            Remove-Item -LiteralPath $archivo.FullName -Force -ErrorAction Stop
+            $archivos++
+            $bytes += $archivo.Length
+        } catch { $enUso++ }
+    }
+    Borrar-CarpetasVacias $viejos
     $script:TotalArchivos += $archivos
     $script:TotalBytes    += $bytes
-    if ($archivos -eq 0) { Escribir-Linea $nombre 'nada' 'info' }
-    else                 { Escribir-Linea $nombre ('{0} archivos, {1:N1} MB' -f $archivos, ($bytes / 1MB)) 'ok' }
+    $texto = if ($archivos) { '{0} archivos, {1:N1} MB' -f $archivos, ($bytes / 1MB) } else { 'nada' }
+    if ($enUso) { $texto += " · $enUso en uso (se dejan)" }
+    Escribir-Linea $nombre $texto $(if ($archivos) { 'ok' } else { 'info' })
+}
+
+# Borra las carpetas de la lista que quedaron vacías, de la más profunda a la menos profunda.
+# Nunca toca accesos directos de carpeta (junctions/enlaces), para no salirse de la carpeta que se limpia.
+function Borrar-CarpetasVacias($items) {
+    $items | Where-Object { $_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+        Sort-Object { $_.FullName.Length } -Descending |
+        ForEach-Object { try { $_.Delete() } catch {} }   # Delete() sin $true falla solo si no está vacía
 }
 
 # Borra la caché de un programa solo si está instalado y cerrado.

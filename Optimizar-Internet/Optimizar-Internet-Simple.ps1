@@ -1,13 +1,23 @@
 ﻿# Optimizar-Internet-Simple.ps1 - Renueva la IP (si no hay VPN), revisa la conexión paso a paso y, como admin, hace el mantenimiento de red.
 # Doble clic: renovar IP y diagnóstico. Clic derecho > Ejecutar como administrador: también mantenimiento y tus ajustes.
-# Orden del archivo: CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > CONEXIÓN Y DIAGNÓSTICO > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > CONEXIÓN Y DIAGNÓSTICO > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+
+# ════════ CHEQUEO INICIAL ════════
+
+# Si la empresa restringe PowerShell (modo de lenguaje restringido), avisar y no hacer nada.
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    Write-Host '   PowerShell está restringido en este equipo por política de la empresa: esta herramienta no se ejecuta aquí.' -ForegroundColor Red
+    return
+}
 
 # ════════ CONFIGURACIÓN ════════
 
 $ServidorInternet = '8.8.8.8'             # servidor público para medir internet (solo sin VPN)
 $PaginaPruebaDns  = 'www.microsoft.com'   # nombre que se busca para probar el DNS
-$MsRouter         = 15                    # respuesta normal del router (ms); más que esto, aviso
-$MsInternet       = 60                    # respuesta normal de internet (ms); más que esto, aviso
+$MsRouter         = 15                    # respuesta del router (ms): más que esto, amarillo
+$MsRouterMalo     = 50                    #                         más que esto, rojo
+$MsInternet       = 60                    # respuesta de internet (ms): más que esto, amarillo
+$MsInternetMalo   = 150                   #                            más que esto, rojo
 # Adaptadores virtuales que NO son VPN (máquinas virtuales y similares)
 $NoEsVpn = 'Hyper-V|vEthernet|VMware|VirtualBox|Loopback|Bluetooth|WSL|Docker|Npcap|Wi-Fi Direct'
 
@@ -75,12 +85,15 @@ function Obtener-Vpn($fisicos) {
     })
 }
 
-# 4 pings: verde si responden todos a tiempo, amarillo si se pierden o tardan más de $msMaximo.
-function Hacer-Ping($nombre, $destino, $msMaximo) {
+# 4 pings. Verde: responden todos a tiempo. Amarillo: se pierde alguno o tardan más de $msAviso.
+# Rojo: se pierde la mitad o más, o tardan más de $msMal.
+function Hacer-Ping($nombre, $destino, $msAviso, $msMal) {
     $respuestas = @(Test-Connection $destino -Count 4 -ErrorAction SilentlyContinue)
     if ($respuestas.Count -eq 0) { Escribir-Linea $nombre "$destino no responde (algunos equipos bloquean el ping)" 'aviso'; return }
     $promedio = ($respuestas | Measure-Object ResponseTime -Average).Average
-    $tipo = if ($respuestas.Count -lt 4 -or $promedio -gt $msMaximo) { 'aviso' } else { 'ok' }
+    $tipo = if ($respuestas.Count -le 2 -or $promedio -gt $msMal) { 'mal' }
+            elseif ($respuestas.Count -lt 4 -or $promedio -gt $msAviso) { 'aviso' }
+            else { 'ok' }
     Escribir-Linea $nombre ('{0}: {1} de 4 respuestas, {2:N0} ms' -f $destino, $respuestas.Count, $promedio) $tipo
 }
 
@@ -105,7 +118,12 @@ function Renovar-IP($adaptador) {
 
 function Mostrar-Conexion($adaptador) {
     $c = Get-NetIPConfiguration -InterfaceIndex $adaptador.ifIndex
-    Escribir-Linea $adaptador.Name $adaptador.LinkSpeed
+    # Cable (NdisPhysicalMedium 14 = Ethernet) conectado a menos de 1 Gbps: suele ser el cable o el puerto.
+    if ($adaptador.NdisPhysicalMedium -eq 14 -and $adaptador.ReceiveLinkSpeed -lt 1e9) {
+        Escribir-Linea $adaptador.Name "$($adaptador.LinkSpeed) (si tu plan es más rápido, cambia el cable a Cat 5e o más, o el puerto)" 'aviso'
+    } else {
+        Escribir-Linea $adaptador.Name $adaptador.LinkSpeed
+    }
     Escribir-Linea '  IP' ($c.IPv4Address.IPAddress -join ', ')
     Escribir-Linea '  Router' ($c.IPv4DefaultGateway.NextHop -join ', ')
     Escribir-Linea '  DNS' ((($c.DNSServer | Where-Object AddressFamily -eq 2).ServerAddresses) -join ', ')
@@ -113,9 +131,13 @@ function Mostrar-Conexion($adaptador) {
 
 # Red, señal, banda y velocidad (Windows en español o en inglés). La señal sale en color.
 function Mostrar-Wifi {
-    $lineas = netsh wlan show interfaces | Select-String '^\s*(SSID|Se.al|Signal|Banda|Band|Velocidad|.*rate)\b'
+    # netsh entrega su texto en UTF-8; sin esto "Señal" llega como "Se├▒al" y no se reconoce.
+    $codificacion = [Console]::OutputEncoding
+    [Console]::OutputEncoding = [Text.Encoding]::UTF8
+    try     { $lineas = netsh wlan show interfaces | Select-String '^\s*(SSID|Se.al|Signal|Banda|Band|Velocidad|.*rate)\b' }
+    finally { [Console]::OutputEncoding = $codificacion }
     if (-not $lineas) { return }   # sin Wi-Fi
-    Escribir-Linea 'Wi-Fi' ''
+    Escribir-Linea 'Datos del Wi-Fi' ''
     foreach ($linea in $lineas) {
         $nombre, $valor = ($linea.Line -split ':', 2).Trim()
         $tipo = 'normal'
@@ -137,21 +159,21 @@ function Probar-Servicio($nombre, $servicio) {
     else                       { Escribir-Linea $nombre "$estado (como admin se intenta iniciar)" 'mal' }
 }
 
-function Probar-Router($adaptador) {
-    foreach ($router in (Get-NetIPConfiguration -InterfaceIndex $adaptador.ifIndex).IPv4DefaultGateway.NextHop) {
-        Hacer-Ping 'Ping al router' $router $MsRouter
-    }
+# Un ping por router, aunque el cable y el Wi-Fi usen el mismo.
+function Probar-Router($adaptadores) {
+    $routers = $adaptadores | ForEach-Object { (Get-NetIPConfiguration -InterfaceIndex $_.ifIndex).IPv4DefaultGateway.NextHop } | Sort-Object -Unique
+    foreach ($router in $routers) { Hacer-Ping 'Ping al router' $router $MsRouter $MsRouterMalo }
 }
 
 function Probar-Internet {
-    Hacer-Ping 'Ping a internet' $ServidorInternet $MsInternet
+    Hacer-Ping 'Ping a internet' $ServidorInternet $MsInternet $MsInternetMalo
 }
 
+# Basta con que una conexión tenga internet (con VPN, la salida va por la VPN y las demás quedan como red local).
 function Mostrar-SalidaInternet {
-    foreach ($perfil in Get-NetConnectionProfile) {
-        $tipo = if ($perfil.IPv4Connectivity -eq 'Internet') { 'ok' } else { 'mal' }
-        Escribir-Linea 'Windows ve internet' ('{0}: {1}' -f $perfil.InterfaceAlias, $perfil.IPv4Connectivity) $tipo
-    }
+    $conInternet = @(Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' })
+    if ($conInternet) { Escribir-Linea 'Windows ve internet' ('sí, por ' + ($conInternet.InterfaceAlias -join ', ')) 'ok' }
+    else              { Escribir-Linea 'Windows ve internet' 'no: hay red, pero no salida a internet' 'mal' }
 }
 
 function Probar-Dns {
@@ -265,7 +287,7 @@ function Main {
     Escribir-Titulo 'Diagnóstico'
     Probar-Servicio 'Servicio DHCP' 'Dhcp'
     Probar-Servicio 'Servicio Cliente DNS' 'Dnscache'
-    foreach ($a in $fisicos) { Probar-Router $a }
+    Probar-Router $fisicos
     if ($vpn) { Escribir-Linea 'Ping a internet' 'se salta con VPN' 'info' }
     else      { Probar-Internet }
     Mostrar-SalidaInternet
