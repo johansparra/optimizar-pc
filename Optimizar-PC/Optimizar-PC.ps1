@@ -161,12 +161,6 @@ function Show-Trim {
     else { Write-Line 'TRIM (discos SSD)' 'desactivado: actívalo como admin con "fsutil behavior set DisableDeleteNotify 0"' 'aviso' }
 }
 
-function Show-Memory {
-    $os = Get-CimInstance Win32_OperatingSystem
-    $usadaKB = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-    Write-Bar 'Memoria' (100 * $usadaKB / $os.TotalVisibleMemorySize) ('{0:N1} GB de {1:N1} GB en uso' -f ($usadaKB / 1MB), ($os.TotalVisibleMemorySize / 1MB))
-}
-
 function Show-DaysSinceRestart {
     $dias = ((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).Days
     if ($dias -ge 7) { Write-Line 'Días sin reiniciar' "$dias (reinicia con Inicio > Reiniciar)" 'aviso' }
@@ -341,7 +335,6 @@ function Main {
     Write-Title 'Revisión del equipo'
     Show-Disk
     Show-Trim
-    Show-Memory
     Show-DaysSinceRestart
     Show-PendingRestart
     Show-StartupPrograms
