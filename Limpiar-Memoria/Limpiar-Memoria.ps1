@@ -1,165 +1,145 @@
-﻿<#
-    Limpiar-Memoria.ps1  -  Libera memoria RAM de tus programas abiertos.
-    NO necesita permisos de administrador.
+﻿# Limpiar-Memoria.ps1 - Libera la RAM que no usan los programas de la lista y muestra el antes y el después. Sin administrador.
+# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
 
-    Cómo funciona
-      Le pide a Windows que saque de la RAM la memoria que no están usando los
-      programas de la lista $Programas (navegadores, Office, Teams...). Es lo
-      mismo que Windows hace por su cuenta cuando le falta memoria.
-      No toca nada más: ni Windows, ni antivirus, VPN, Zscaler u otros
-      programas de seguridad.
-      No compila código, no instala nada y no se conecta a internet.
+# ════════ CHEQUEO INICIAL ════════
 
-    Uso
-      Doble clic en Limpiar-Memoria.bat
-#>
-
-# Programas a los que se les libera memoria. Solo estos; todo lo demás se deja
-# como está. Puedes añadir o quitar nombres (sin .exe); acepta comodines (*).
-$Programas = @(
-    # Navegadores
-    'chrome', 'msedge', 'msedgewebview2', 'firefox', 'brave', 'opera'
-    # Office, correo y reuniones (CiscoCollabHost y atmgr son Webex)
-    'OUTLOOK', 'olk', 'WINWORD', 'EXCEL', 'POWERPNT', 'ONENOTE', 'MSACCESS'
-    'ms-teams', 'Teams', 'lync', 'CiscoCollabHost', 'atmgr', 'Zoom', 'slack'
-    # Escritorio de Windows (explorador, menú Inicio, búsqueda)
-    'explorer', 'SearchHost', 'StartMenuExperienceHost', 'ShellExperienceHost', 'TextInputHost', 'Widgets'
-    # Otros
-    'Acrobat', 'AcroRd32', 'Code', 'notepad', 'Spotify', 'WhatsApp', 'Discord'
-)
-
-function Test-EnLista([string]$Nombre) {
-    foreach ($patron in $Programas) { if ($Nombre -like $patron) { return $true } }
-    return $false
-}
-
-function Get-ProgramasALimpiar {
-    # Solo procesos de tu sesión que estén en la lista
-    $sesion = (Get-Process -Id $PID).SessionId
-    Get-Process | Where-Object { $_.SessionId -eq $sesion -and (Test-EnLista $_.ProcessName) }
-}
-
-function Clear-MemoriaProceso($Proceso) {
-    # Volver a fijar el límite de memoria que el proceso ya tiene hace que Windows
-    # le recorte la RAM que no está usando (igual que EmptyWorkingSet). No cambia
-    # ningún ajuste del programa. Si no hay permiso, simplemente no hace nada.
-    try {
-        $limite = $Proceso.MaxWorkingSet
-        if ($null -eq $limite) { return $false }
-        $Proceso.MaxWorkingSet = $limite
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Get-Ram {
-    $os = Get-CimInstance Win32_OperatingSystem
-    $total = [double]$os.TotalVisibleMemorySize * 1KB
-    $disponible = [double]$os.FreePhysicalMemory * 1KB
-    [pscustomobject]@{
-        Total      = $total
-        Disponible = $disponible
-        EnUso      = $total - $disponible
-        Pct        = 100 * ($total - $disponible) / $total
-    }
-}
-
-function Format-Tamano([double]$Bytes) {
-    if ([math]::Abs($Bytes) -ge 1GB) { return '{0:N1} GB' -f ($Bytes / 1GB) }
-    if ([math]::Abs($Bytes) -ge 1MB) { return '{0:N0} MB' -f ($Bytes / 1MB) }
-    return '{0:N0} KB' -f ($Bytes / 1KB)
-}
-
-function Write-Titulo([string]$Texto) {
-    $linea = '═' * 62
-    Write-Host ''
-    Write-Host "  $linea" -ForegroundColor DarkCyan
-    Write-Host "   $Texto" -ForegroundColor Cyan
-    Write-Host "  $linea" -ForegroundColor DarkCyan
-    Write-Host ''
-}
-
-function Write-Barra([string]$Etiqueta, [double]$Pct, [string]$Detalle) {
-    $ancho = 30
-    $llenos = [int][math]::Round([math]::Min(100, [math]::Max(0, $Pct)) / 100 * $ancho)
-    $color = if ($Pct -ge 85) { 'Red' } elseif ($Pct -ge 70) { 'Yellow' } else { 'Green' }
-    Write-Host ('   {0,-8} ' -f $Etiqueta) -NoNewline
-    Write-Host ('█' * $llenos) -ForegroundColor $color -NoNewline
-    Write-Host ('░' * ($ancho - $llenos)) -ForegroundColor DarkGray -NoNewline
-    Write-Host (' {0,3:N0} %   {1}' -f $Pct, $Detalle)
-}
-
-# ─── Programa ────────────────────────────────────────────────────────────────
-
+# Si la empresa restringe PowerShell (modo de lenguaje restringido), avisar y no hacer nada.
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
-    Write-Host ''
-    Write-Host '  PowerShell está restringido en este equipo por política de la empresa.' -ForegroundColor Red
-    Write-Host '  La limpieza de memoria no se ejecuta aquí.' -ForegroundColor Red
+    Write-Host '   PowerShell está restringido en este equipo por política de la empresa: esta herramienta no se ejecuta aquí.' -ForegroundColor Red
     return
 }
 
-$Host.UI.RawUI.WindowTitle = 'Limpiar memoria RAM'
-Write-Titulo 'LIMPIAR MEMORIA RAM'
-Write-Host '   Liberando memoria de tus programas...' -ForegroundColor DarkGray
+# ════════ CONFIGURACIÓN ════════
 
-$antes = Get-Ram
-$procesos = @(Get-ProgramasALimpiar)
-$memoriaAntes = @{}
-foreach ($p in $procesos) { $memoriaAntes[$p.Id] = $p.WorkingSet64 }
+# Solo se toca a estos programas; nada de Windows, antivirus, VPN ni Zscaler. Nombres sin .exe.
+$Programas = 'chrome', 'msedge', 'msedgewebview2', 'firefox', 'brave', 'opera',
+    'OUTLOOK', 'olk', 'WINWORD', 'EXCEL', 'POWERPNT', 'ONENOTE', 'MSACCESS',
+    'ms-teams', 'Teams', 'lync', 'CiscoCollabHost', 'atmgr', 'Zoom', 'slack',
+    'explorer', 'SearchHost', 'StartMenuExperienceHost', 'ShellExperienceHost', 'TextInputHost', 'Widgets',
+    'Acrobat', 'AcroRd32', 'Code', 'notepad', 'Spotify', 'WhatsApp', 'Discord'
 
-$limpiados = @()
-$sinPermiso = 0
-foreach ($p in $procesos) {
-    if (Clear-MemoriaProceso $p) { $limpiados += $p } else { $sinPermiso++ }
-}
+# ════════ VISTA (todo lo visual está aquí: colores, títulos y barras) ════════
 
-Start-Sleep -Seconds 2      # dar tiempo a Windows de actualizar sus contadores
-$despues = Get-Ram
-$liberado = $despues.Disponible - $antes.Disponible
+# Cada resultado tiene un tipo; aquí se decide su color.
+$Colores = @{ ok = 'Green'; aviso = 'Yellow'; mal = 'Red'; info = 'DarkGray'; normal = 'Gray' }
 
-# Cuánto soltó cada programa (sumando todos sus procesos)
-$memoriaAhora = @{}
-foreach ($p in Get-Process) { $memoriaAhora[$p.Id] = $p.WorkingSet64 }
-$porPrograma = $limpiados | Group-Object ProcessName | ForEach-Object {
-    $a = 0; $d = 0
-    foreach ($p in $_.Group) {
-        $a += $memoriaAntes[$p.Id]
-        if ($memoriaAhora.ContainsKey($p.Id)) { $d += $memoriaAhora[$p.Id] }
-    }
-    [pscustomobject]@{ Nombre = $_.Name; Cantidad = $_.Count; Antes = $a; Ahora = $d; Liberado = $a - $d }
-} | Where-Object Liberado -gt 0 | Sort-Object Liberado -Descending | Select-Object -First 8
-
-# ─── Resultado ───────────────────────────────────────────────────────────────
-
-Write-Host ''
-$total = Format-Tamano $antes.Total
-Write-Barra 'Antes'   $antes.Pct   ('{0} de {1}' -f (Format-Tamano $antes.EnUso), $total)
-Write-Barra 'Después' $despues.Pct ('{0} de {1}' -f (Format-Tamano $despues.EnUso), $total)
-Write-Host ''
-if ($liberado -ge 50MB) {
-    Write-Host '   Memoria liberada: ' -NoNewline
-    Write-Host (Format-Tamano $liberado) -ForegroundColor Green
-} else {
-    Write-Host '   Tus programas ya usaban poca memoria; no había mucho que liberar.' -ForegroundColor Yellow
-}
-$resumen = '   {0} procesos limpiados' -f $limpiados.Count
-if ($sinPermiso) { $resumen += ' · {0} sin permiso (abiertos como administrador)' -f $sinPermiso }
-Write-Host $resumen -ForegroundColor DarkGray
-
-if ($porPrograma) {
+# Título grande al abrir el script.
+function Escribir-Encabezado($texto) {
+    $Host.UI.RawUI.WindowTitle = $texto
+    $linea = '═' * 62
     Write-Host ''
-    Write-Host ('   {0,-30}{1,10}{2,10}{3,10}' -f 'Los que más memoria soltaron', 'Antes', 'Ahora', 'Liberado') -ForegroundColor Cyan
-    Write-Host ('   ' + '─' * 60) -ForegroundColor DarkGray
-    foreach ($fila in $porPrograma) {
-        $nombre = $fila.Nombre
-        if ($nombre.Length -gt 22) { $nombre = $nombre.Substring(0, 21) + '…' }
-        if ($fila.Cantidad -gt 1) { $nombre = '{0} ({1})' -f $nombre, $fila.Cantidad }
-        Write-Host ('   {0,-30}{1,10}{2,10}' -f $nombre, (Format-Tamano $fila.Antes), (Format-Tamano $fila.Ahora)) -NoNewline
-        Write-Host ('{0,10}' -f (Format-Tamano $fila.Liberado)) -ForegroundColor Green
-    }
+    Write-Host "  $linea" -ForegroundColor DarkCyan
+    Write-Host "   $texto" -ForegroundColor Cyan
+    Write-Host "  $linea" -ForegroundColor DarkCyan
 }
 
-Write-Host ''
-Write-Host '   Solo se tocan los programas de la lista; nada de Windows, antivirus ni VPN.' -ForegroundColor DarkGray
-Write-Host '   Es normal que la memoria vuelva a subir a medida que usas los programas.' -ForegroundColor DarkGray
+# Título de cada sección, con una raya debajo.
+function Escribir-Titulo($texto) {
+    Write-Host ''
+    Write-Host "   $texto" -ForegroundColor Cyan
+    Write-Host ('   ' + '─' * 58) -ForegroundColor DarkGray
+}
+
+# Una línea del reporte: qué se hizo a la izquierda, resultado a la derecha con el color de su tipo.
+function Escribir-Linea($nombre, $resultado, $tipo = 'normal') {
+    Write-Host ('   {0,-32} ' -f $nombre) -NoNewline   # el espacio final separa aunque el nombre sea largo
+    Write-Host $resultado -ForegroundColor $Colores[$tipo]
+}
+
+# Barra de uso: verde, amarilla desde 80 % y roja desde 90 %.
+function Escribir-Barra($nombre, $pct, $detalle) {
+    $llenos = [int]($pct / 100 * 30)
+    $tipo = if ($pct -ge 90) { 'mal' } elseif ($pct -ge 80) { 'aviso' } else { 'ok' }
+    Write-Host ('   {0,-10}' -f $nombre) -NoNewline
+    Write-Host ('█' * $llenos) -ForegroundColor $Colores[$tipo] -NoNewline
+    Write-Host ('░' * (30 - $llenos)) -ForegroundColor DarkGray -NoNewline
+    Write-Host (' {0,3:N0} %   {1}' -f $pct, $detalle)
+}
+
+# ════════ MÉTODOS REUTILIZABLES ════════
+
+function Obtener-RamLibreMB {
+    (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB
+}
+
+# Los programas de la lista abiertos en TU sesión (no los de otros usuarios conectados al mismo PC).
+function Obtener-ProgramasDeTuSesion {
+    $sesion = (Get-Process -Id $PID).SessionId
+    @(Get-Process -Name $Programas -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sesion)
+}
+
+# Volver a fijar su propio límite hace que Windows le recorte la RAM que no está usando.
+# Devuelve $true si lo logró y $false si no hay permiso (programa abierto como administrador).
+function Liberar-RamProceso($proceso) {
+    try { $proceso.MaxWorkingSet = $proceso.MaxWorkingSet; $true } catch { $false }
+}
+
+# ════════ ACCIONES (un método = una tarea) ════════
+
+# Barra con la RAM en uso en este momento.
+function Mostrar-Memoria($momento) {
+    $os = Get-CimInstance Win32_OperatingSystem
+    $usadaKB = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+    Escribir-Barra $momento (100 * $usadaKB / $os.TotalVisibleMemorySize) ('{0:N1} GB de {1:N1} GB en uso' -f ($usadaKB / 1MB), ($os.TotalVisibleMemorySize / 1MB))
+}
+
+# Libera la RAM de cada proceso, reporta cuántos lo lograron y devuelve esos procesos.
+function Liberar-RamProgramas($procesos) {
+    $limpiados = @($procesos | Where-Object { Liberar-RamProceso $_ })
+    Escribir-Linea 'Procesos limpiados' $limpiados.Count 'ok'
+    $sinPermiso = $procesos.Count - $limpiados.Count
+    if ($sinPermiso) { Escribir-Linea 'Sin permiso' "$sinPermiso (abiertos como administrador)" 'info' }
+    $limpiados
+}
+
+# Cuánto soltó cada programa: la RAM que tenía al empezar (guardada en $procesos) contra la de ahora.
+function Mostrar-QuienSolto($procesos) {
+    $ahora = @{}
+    Get-Process | ForEach-Object { $ahora[$_.Id] = $_.WorkingSet64 }
+    Escribir-Linea 'Lo que soltó cada programa' ''
+    $procesos | Group-Object ProcessName | ForEach-Object {
+        $antesMB = ($_.Group | Measure-Object WorkingSet64 -Sum).Sum / 1MB
+        $ahoraMB = ($_.Group | ForEach-Object { [long]$ahora[$_.Id] } | Measure-Object -Sum).Sum / 1MB   # cerrado = 0
+        [pscustomobject]@{ Nombre = '{0} ({1})' -f $_.Name, $_.Count; Antes = $antesMB; Ahora = $ahoraMB; Solto = $antesMB - $ahoraMB }
+    } | Where-Object Solto -ge 1 | Sort-Object Solto -Descending | Select-Object -First 8 |
+        ForEach-Object { Escribir-Linea "  $($_.Nombre)" ('{0:N0} MB  (de {1:N0} a {2:N0} MB)' -f $_.Solto, $_.Antes, $_.Ahora) 'ok' }
+}
+
+function Mostrar-RamLiberada($libreAntesMB) {
+    $liberada = (Obtener-RamLibreMB) - $libreAntesMB
+    if ($liberada -ge 50) { Escribir-Linea 'RAM liberada' ('{0:N0} MB' -f $liberada) 'ok' }
+    else                  { Escribir-Linea 'RAM liberada' 'poca: tus programas ya usaban poca memoria' 'info' }
+}
+
+function Mostrar-TopMemoria {
+    Escribir-Linea 'Lo que más RAM usa ahora' ''
+    Get-Process | Group-Object ProcessName |
+        Select-Object Name, Count, @{ n = 'MB'; e = { ($_.Group | Measure-Object WorkingSet64 -Sum).Sum / 1MB } } |
+        Sort-Object MB -Descending | Select-Object -First 5 |
+        ForEach-Object { Escribir-Linea ('  {0} ({1})' -f $_.Name, $_.Count) ('{0:N0} MB' -f $_.MB) }
+}
+
+# ════════ MAIN ════════
+
+function Main {
+    Escribir-Encabezado 'LIMPIAR MEMORIA RAM'
+    $libreAntes = Obtener-RamLibreMB
+    $procesos = Obtener-ProgramasDeTuSesion   # cada proceso guarda la RAM que tenía en este momento
+
+    # 1. Antes, liberar, después.
+    Escribir-Titulo 'Memoria'
+    Mostrar-Memoria 'Antes'
+    $limpiados = Liberar-RamProgramas $procesos
+    Start-Sleep -Seconds 2   # dar tiempo a Windows de actualizar sus contadores
+    Mostrar-Memoria 'Después'
+
+    # 2. Cuánto se liberó, quién lo soltó y quién usa más ahora.
+    Escribir-Titulo 'Resultado'
+    Mostrar-RamLiberada $libreAntes
+    Mostrar-QuienSolto $limpiados
+    Mostrar-TopMemoria
+
+    Escribir-Titulo 'Listo'
+}
+
+Main

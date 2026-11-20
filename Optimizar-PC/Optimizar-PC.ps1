@@ -1,298 +1,348 @@
-﻿<#
-    Optimizar-PC.ps1  -  Limpia archivos temporales y cachés, y revisa el equipo.
-    NO necesita permisos de administrador: solo toca archivos de TU usuario.
+﻿# Optimizar-PC.ps1 - Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo.
+# Doble clic: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows.
+# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > REVISIÓN > LIMPIEZA > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
 
-    Qué limpia
-      - Archivos temporales con más de 24 horas (los recientes se dejan para no
-        afectar programas abiertos; los que están en uso se saltan solos)
-      - Caché de Internet de Windows
-      - Caché de Chrome, Edge, Brave y Firefox, solo si el navegador está cerrado
-        (no toca contraseñas, historial, cookies ni sesiones abiertas)
-      - La Papelera de reciclaje, solo si dices que sí
-    Qué revisa
-      - Espacio en disco, días sin reiniciar, actualizaciones pendientes,
-        programas que arrancan con Windows y los que más memoria usan
+# ════════ CHEQUEO INICIAL ════════
 
-    Uso
-      Doble clic en Optimizar-PC.bat
-      Modo prueba (calcula pero no borra nada), desde PowerShell:
-        powershell -ExecutionPolicy RemoteSigned -File .\Optimizar-PC.ps1 -Simular
-#>
-param([switch]$Simular)
-
-$HorasMinimas = 24   # antigüedad mínima de un archivo temporal para borrarlo
-
-function Format-Tamano([double]$Bytes) {
-    if ([math]::Abs($Bytes) -ge 1GB) { return '{0:N1} GB' -f ($Bytes / 1GB) }
-    if ([math]::Abs($Bytes) -ge 1MB) { return '{0:N0} MB' -f ($Bytes / 1MB) }
-    return '{0:N0} KB' -f ($Bytes / 1KB)
-}
-
-function Write-Titulo([string]$Texto) {
-    $linea = '═' * 62
-    Write-Host ''
-    Write-Host "  $linea" -ForegroundColor DarkCyan
-    Write-Host "   $Texto" -ForegroundColor Cyan
-    Write-Host "  $linea" -ForegroundColor DarkCyan
-    Write-Host ''
-}
-
-function Write-Seccion([string]$Texto) {
-    Write-Host ''
-    Write-Host "   $Texto" -ForegroundColor Cyan
-    Write-Host ('   ' + '─' * 58) -ForegroundColor DarkGray
-}
-
-function Write-Barra([string]$Etiqueta, [double]$Pct, [string]$Detalle) {
-    $ancho = 30
-    $llenos = [int][math]::Round([math]::Min(100, [math]::Max(0, $Pct)) / 100 * $ancho)
-    $color = if ($Pct -ge 90) { 'Red' } elseif ($Pct -ge 80) { 'Yellow' } else { 'Green' }
-    Write-Host ('   {0,-9}' -f $Etiqueta) -NoNewline
-    Write-Host ('█' * $llenos) -ForegroundColor $color -NoNewline
-    Write-Host ('░' * ($ancho - $llenos)) -ForegroundColor DarkGray -NoNewline
-    Write-Host (' {0,3:N0} %   {1}' -f $Pct, $Detalle)
-}
-
-function Write-Estado([string]$Tipo, [string]$Texto) {
-    switch ($Tipo) {
-        'ok'    { $marca = 'OK'; $color = 'Green' }
-        'aviso' { $marca = '!!'; $color = 'Yellow' }
-        'mal'   { $marca = 'XX'; $color = 'Red' }
-        default { $marca = '--'; $color = 'DarkGray' }
-    }
-    Write-Host '   [' -NoNewline
-    Write-Host $marca -ForegroundColor $color -NoNewline
-    Write-Host "] $Texto"
-}
-
-function Get-ContenidoSinEnlaces([string]$Carpeta) {
-    # Recorre la carpeta sin seguir accesos directos de carpeta (junctions /
-    # enlaces simbólicos), para no salirse nunca de ella.
-    foreach ($item in Get-ChildItem -LiteralPath $Carpeta -Force -ErrorAction SilentlyContinue) {
-        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-        $item
-        if ($item.PSIsContainer) { Get-ContenidoSinEnlaces $item.FullName }
-    }
-}
-
-function Clear-Carpeta([string]$Carpeta, [int]$Horas) {
-    # Borra el contenido (no la carpeta) con más de $Horas de antigüedad.
-    $limite = (Get-Date).AddHours(-$Horas)
-    $items = @(Get-ContenidoSinEnlaces $Carpeta)
-    $liberado = 0L
-    $enUso = 0
-    foreach ($archivo in $items) {
-        if ($archivo.PSIsContainer -or $archivo.LastWriteTime -gt $limite) { continue }
-        if ($Simular) { $liberado += $archivo.Length; continue }
-        try {
-            if ($archivo.IsReadOnly) { $archivo.IsReadOnly = $false }
-            $archivo.Delete()
-            $liberado += $archivo.Length
-        } catch {
-            $enUso++    # abierto por algún programa: se deja
-        }
-    }
-    if (-not $Simular) {
-        # Subcarpetas que quedaron vacías, de la más profunda a la menos profunda
-        $carpetas = $items | Where-Object { $_.PSIsContainer -and $_.LastWriteTime -le $limite } |
-            Sort-Object { $_.FullName.Length } -Descending
-        foreach ($sub in $carpetas) {
-            try { [IO.Directory]::Delete($sub.FullName, $false) } catch { }   # falla sola si no está vacía
-        }
-    }
-    [pscustomobject]@{ Liberado = $liberado; EnUso = $enUso }
-}
-
-function Get-Papelera {
-    # Tamaño de TU papelera en cada disco local
-    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $bytes = 0L
-    $elementos = 0
-    $unidades = @()
-    foreach ($disco in Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3') {
-        $ruta = "$($disco.DeviceID)\`$Recycle.Bin\$sid"
-        if (-not (Test-Path -LiteralPath $ruta)) { continue }
-        $archivos = @(Get-ContenidoSinEnlaces $ruta | Where-Object { -not $_.PSIsContainer })
-        if (-not $archivos) { continue }
-        $bytes += ($archivos | Measure-Object Length -Sum).Sum
-        $elementos += @($archivos | Where-Object { $_.Name -like '$I*' }).Count
-        $unidades += $disco.DeviceID.TrimEnd(':')
-    }
-    [pscustomobject]@{ Bytes = $bytes; Elementos = $elementos; Unidades = $unidades }
-}
-
-function Test-Desactivado([string]$Clave, [string]$Nombre) {
-    # Aquí guarda Windows lo que desactivas en Administrador de tareas > Inicio
-    # (si el primer byte es impar, está desactivado).
-    $valor = (Get-ItemProperty -LiteralPath $Clave -Name $Nombre -ErrorAction SilentlyContinue).$Nombre
-    return [bool]($valor -is [byte[]] -and $valor.Length -gt 0 -and ($valor[0] -band 1))
-}
-
-function Get-ProgramasInicio {
-    $aprobados = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved'
-    $claves = @(
-        @{ Ruta = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run';             Aprobado = "HKCU:\$aprobados\Run" }
-        @{ Ruta = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run';             Aprobado = "HKLM:\$aprobados\Run" }
-        @{ Ruta = 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'; Aprobado = "HKLM:\$aprobados\Run32" }
-    )
-    foreach ($clave in $claves) {
-        $item = Get-Item -LiteralPath $clave.Ruta -ErrorAction SilentlyContinue
-        if (-not $item) { continue }
-        foreach ($nombre in $item.Property) {
-            if ($nombre -and $nombre -ne '(default)' -and -not (Test-Desactivado $clave.Aprobado $nombre)) { $nombre }
-        }
-    }
-    $carpetas = @(
-        @{ Ruta = [Environment]::GetFolderPath('Startup');       Aprobado = "HKCU:\$aprobados\StartupFolder" }
-        @{ Ruta = [Environment]::GetFolderPath('CommonStartup'); Aprobado = "HKLM:\$aprobados\StartupFolder" }
-    )
-    foreach ($carpeta in $carpetas) {
-        if (-not $carpeta.Ruta) { continue }
-        foreach ($acceso in Get-ChildItem -LiteralPath $carpeta.Ruta -File -ErrorAction SilentlyContinue) {
-            if (-not (Test-Desactivado $carpeta.Aprobado $acceso.Name)) { $acceso.BaseName }
-        }
-    }
-}
-
-# ─── Programa ────────────────────────────────────────────────────────────────
-
+# Si la empresa restringe PowerShell (modo de lenguaje restringido), avisar y no hacer nada.
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
-    Write-Host ''
-    Write-Host '  PowerShell está restringido en este equipo por política de la empresa.' -ForegroundColor Red
-    Write-Host '  Esta herramienta no se ejecuta aquí.' -ForegroundColor Red
+    Write-Host '   PowerShell está restringido en este equipo por política de la empresa: esta herramienta no se ejecuta aquí.' -ForegroundColor Red
     return
 }
 
-$Host.UI.RawUI.WindowTitle = 'Optimizar PC'
-Write-Titulo 'OPTIMIZAR PC'
-if ($Simular) { Write-Host '   MODO PRUEBA: solo calcula, no borra nada.' -ForegroundColor Yellow }
+# ════════ CONFIGURACIÓN ════════
 
-$local  = $env:LOCALAPPDATA
-$chrome = "$local\Google\Chrome\User Data"
-$edge   = "$local\Microsoft\Edge\User Data"
-$brave  = "$local\BraveSoftware\Brave-Browser\User Data"
-$limpiezas = @(
-    @{ Nombre = 'Archivos temporales';         Horas = $HorasMinimas; Navegador = '';        Rutas = @($env:TEMP) }
-    @{ Nombre = 'Caché de Internet (Windows)'; Horas = $HorasMinimas; Navegador = '';        Rutas = @("$local\Microsoft\Windows\INetCache") }
-    @{ Nombre = 'Caché de Chrome';             Horas = 0;             Navegador = 'chrome';  Rutas = @("$chrome\*\Cache", "$chrome\*\Code Cache", "$chrome\*\GPUCache") }
-    @{ Nombre = 'Caché de Edge';               Horas = 0;             Navegador = 'msedge';  Rutas = @("$edge\*\Cache", "$edge\*\Code Cache", "$edge\*\GPUCache") }
-    @{ Nombre = 'Caché de Brave';              Horas = 0;             Navegador = 'brave';   Rutas = @("$brave\*\Cache", "$brave\*\Code Cache", "$brave\*\GPUCache") }
-    @{ Nombre = 'Caché de Firefox';            Horas = 0;             Navegador = 'firefox'; Rutas = @("$local\Mozilla\Firefox\Profiles\*\cache2") }
-)
-$nombreNavegador = @{ chrome = 'Chrome'; msedge = 'Edge'; brave = 'Brave'; firefox = 'Firefox' }
+$HorasMinimas = 24                              # los temporales más nuevos que esto no se tocan
+$Local        = $env:LOCALAPPDATA
+$Unidad       = $env:SystemDrive.TrimEnd(':')   # normalmente C
 
-# La Papelera se pregunta al principio, para que el resto corra sin interrupciones
-$papelera = Get-Papelera
-$vaciarPapelera = $false
-if ($papelera.Bytes -gt 0 -and -not $Simular) {
-    $pregunta = '   La Papelera tiene {0} ({1} elementos). ¿Vaciarla también? (S/N)' -f (Format-Tamano $papelera.Bytes), $papelera.Elementos
-    $vaciarPapelera = (Read-Host $pregunta) -match '^\s*s'
+# Contadores del resumen final; los suma Borrar-Archivos.
+# ($script: = variable compartida por todo el archivo, como un atributo de clase en Java)
+$script:TotalArchivos = 0
+$script:TotalBytes    = 0
+
+# ════════ VISTA (todo lo visual está aquí: colores, títulos y barras) ════════
+
+# Cada resultado tiene un tipo; aquí se decide su color.
+$Colores = @{ ok = 'Green'; aviso = 'Yellow'; mal = 'Red'; info = 'DarkGray'; normal = 'Gray' }
+
+# Título grande al abrir el script.
+function Escribir-Encabezado($texto) {
+    $Host.UI.RawUI.WindowTitle = $texto
+    $linea = '═' * 62
+    Write-Host ''
+    Write-Host "  $linea" -ForegroundColor DarkCyan
+    Write-Host "   $texto" -ForegroundColor Cyan
+    Write-Host "  $linea" -ForegroundColor DarkCyan
 }
 
-Write-Seccion 'Limpieza'
-$totalLiberado = 0L
-foreach ($tarea in $limpiezas) {
-    $carpetas = @(foreach ($ruta in $tarea.Rutas) {
-        Get-Item -Path $ruta -Force -ErrorAction SilentlyContinue | Where-Object PSIsContainer
-    })
-    if (-not $carpetas) { continue }    # programa no instalado
+# Título de cada sección, con una raya debajo.
+function Escribir-Titulo($texto) {
+    Write-Host ''
+    Write-Host "   $texto" -ForegroundColor Cyan
+    Write-Host ('   ' + '─' * 58) -ForegroundColor DarkGray
+}
 
-    Write-Host ('   {0,-34}' -f $tarea.Nombre) -NoNewline
-    if ($tarea.Navegador -and (Get-Process -Name $tarea.Navegador -ErrorAction SilentlyContinue)) {
-        Write-Host ('{0,10}' -f 'omitido') -ForegroundColor Yellow -NoNewline
-        Write-Host ('  ({0} está abierto)' -f $nombreNavegador[$tarea.Navegador]) -ForegroundColor DarkGray
-        continue
-    }
-    $liberado = 0L
+# Una línea del reporte: qué se hizo a la izquierda, resultado a la derecha con el color de su tipo.
+function Escribir-Linea($nombre, $resultado, $tipo = 'normal') {
+    Write-Host ('   {0,-32} ' -f $nombre) -NoNewline   # el espacio final separa aunque el nombre sea largo
+    Write-Host $resultado -ForegroundColor $Colores[$tipo]
+}
+
+# Barra de uso: verde, amarilla desde 80 % y roja desde 90 %.
+function Escribir-Barra($nombre, $pct, $detalle) {
+    $llenos = [int]($pct / 100 * 30)
+    $tipo = if ($pct -ge 90) { 'mal' } elseif ($pct -ge 80) { 'aviso' } else { 'ok' }
+    Write-Host ('   {0,-10}' -f $nombre) -NoNewline
+    Write-Host ('█' * $llenos) -ForegroundColor $Colores[$tipo] -NoNewline
+    Write-Host ('░' * (30 - $llenos)) -ForegroundColor DarkGray -NoNewline
+    Write-Host (' {0,3:N0} %   {1}' -f $pct, $detalle)
+}
+
+# ════════ MÉTODOS REUTILIZABLES ════════
+
+# Borra los archivos y las subcarpetas vacías con más de $horas de antigüedad, y reporta cuántos borró,
+# cuánto pesaban y cuántos estaban en uso. Los que están en uso se dejan.
+function Borrar-Archivos($nombre, $rutas, $horas = 0) {
+    $limite = (Get-Date).AddHours(-$horas)
+    # La lista se toma antes de borrar: al borrar un archivo, su carpeta queda con fecha de ahora.
+    $viejos = @(Get-Item $rutas -Force -ErrorAction SilentlyContinue |
+        Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object LastWriteTime -lt $limite)
+    $archivos = 0
+    $bytes = 0
     $enUso = 0
-    foreach ($carpeta in $carpetas) {
-        $resultado = Clear-Carpeta $carpeta.FullName $tarea.Horas
-        $liberado += $resultado.Liberado
-        $enUso += $resultado.EnUso
+    foreach ($archivo in ($viejos | Where-Object { -not $_.PSIsContainer })) {
+        try {
+            Remove-Item -LiteralPath $archivo.FullName -Force -ErrorAction Stop
+            $archivos++
+            $bytes += $archivo.Length
+        } catch { $enUso++ }
     }
-    $totalLiberado += $liberado
-    if ($liberado -eq 0 -and $enUso -eq 0) { Write-Host ('{0,10}' -f 'nada') -ForegroundColor DarkGray; continue }
-    Write-Host ('{0,10}' -f (Format-Tamano $liberado)) -ForegroundColor Green -NoNewline
-    if ($enUso) { Write-Host ('  ({0} en uso, se dejan)' -f $enUso) -ForegroundColor DarkGray } else { Write-Host '' }
+    Borrar-CarpetasVacias $viejos
+    $script:TotalArchivos += $archivos
+    $script:TotalBytes    += $bytes
+    $texto = if ($archivos) { '{0} archivos, {1:N1} MB' -f $archivos, ($bytes / 1MB) } else { 'nada' }
+    if ($enUso) { $texto += " · $enUso en uso (se dejan)" }
+    Escribir-Linea $nombre $texto $(if ($archivos) { 'ok' } else { 'info' })
 }
 
-if ($papelera.Bytes -gt 0) {
-    Write-Host ('   {0,-34}' -f 'Papelera de reciclaje') -NoNewline
-    if ($Simular) {
-        Write-Host ('{0,10}' -f (Format-Tamano $papelera.Bytes)) -ForegroundColor Green -NoNewline
-        Write-Host '  (solo si confirmas)' -ForegroundColor DarkGray
-    } elseif ($vaciarPapelera) {
-        foreach ($unidad in $papelera.Unidades) { Clear-RecycleBin -DriveLetter $unidad -Force -ErrorAction SilentlyContinue }
-        $restante = (Get-Papelera).Bytes
-        $totalLiberado += $papelera.Bytes - $restante
-        Write-Host ('{0,10}' -f (Format-Tamano ($papelera.Bytes - $restante))) -ForegroundColor Green
+# Borra las carpetas de la lista que quedaron vacías, de la más profunda a la menos profunda.
+# Nunca toca accesos directos de carpeta (junctions/enlaces), para no salirse de la carpeta que se limpia.
+function Borrar-CarpetasVacias($items) {
+    $items | Where-Object { $_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+        Sort-Object { $_.FullName.Length } -Descending |
+        ForEach-Object { try { $_.Delete() } catch {} }   # Delete() sin $true falla solo si no está vacía
+}
+
+# Borra la caché de un programa solo si está instalado y cerrado.
+function Borrar-CacheSiCerrado($nombre, $proceso, $rutas) {
+    if (-not (Get-Item $rutas -Force -ErrorAction SilentlyContinue)) { Escribir-Linea $nombre 'no instalado' 'info'; return }
+    if (Get-Process $proceso -ErrorAction SilentlyContinue) { Escribir-Linea $nombre 'se salta: el programa está abierto' 'aviso'; return }
+    Borrar-Archivos $nombre $rutas
+}
+
+# Carpetas de caché de los navegadores hechos sobre Chrome (Chrome, Edge, Brave), en todos sus perfiles.
+# No incluye contraseñas, historial, cookies ni sesiones.
+function Obtener-CachesChromium($datosUsuario) {
+    "$datosUsuario\*\Cache", "$datosUsuario\*\Code Cache", "$datosUsuario\*\GPUCache"
+}
+
+# Ejecuta una herramienta de Windows, espera a que termine y reporta si salió bien.
+function Ejecutar-Herramienta($nombre, $programa, $argumentos) {
+    Escribir-Linea $nombre 'ejecutando...' 'info'
+    $proceso = Start-Process $programa $argumentos -Wait -PassThru -NoNewWindow
+    if ($proceso.ExitCode -eq 0) { Escribir-Linea $nombre 'OK' 'ok' }
+    else                         { Escribir-Linea $nombre "terminó con código $($proceso.ExitCode)" 'mal' }
+}
+
+function Obtener-EspacioLibreMB {
+    (Get-PSDrive $Unidad).Free / 1MB
+}
+
+# $true si el script se abrió con "Ejecutar como administrador" (funciona con Windows en cualquier idioma).
+function Es-Administrador {
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# El Administrador de tareas guarda en "StartupApproved" lo que desactivas: primer byte impar = desactivado.
+function Esta-Desactivado($claveAprobados, $nombre) {
+    $valor = (Get-ItemProperty $claveAprobados -Name $nombre -ErrorAction SilentlyContinue).$nombre
+    [bool]($valor -and ($valor[0] % 2 -eq 1))
+}
+
+# Programas habilitados de una clave "Run" del registro.
+function Obtener-InicioRegistro($clave, $claveAprobados) {
+    (Get-Item $clave -ErrorAction SilentlyContinue).Property |
+        Where-Object { -not (Esta-Desactivado $claveAprobados $_) }
+}
+
+# Programas habilitados de una carpeta "Inicio" (accesos directos).
+function Obtener-InicioCarpeta($carpeta, $claveAprobados) {
+    Get-ChildItem $carpeta -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne 'desktop.ini' -and -not (Esta-Desactivado $claveAprobados $_.Name) } |
+        ForEach-Object BaseName
+}
+
+# ════════ REVISIÓN (un método = un dato) ════════
+
+function Mostrar-Disco {
+    $disco = Get-PSDrive $Unidad
+    $total = $disco.Used + $disco.Free
+    Escribir-Barra "Disco $Unidad" (100 * $disco.Used / $total) ('{0:N1} GB libres de {1:N1} GB' -f ($disco.Free / 1GB), ($total / 1GB))
+}
+
+function Mostrar-Memoria {
+    $os = Get-CimInstance Win32_OperatingSystem
+    $usadaKB = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+    Escribir-Barra 'Memoria' (100 * $usadaKB / $os.TotalVisibleMemorySize) ('{0:N1} GB de {1:N1} GB en uso' -f ($usadaKB / 1MB), ($os.TotalVisibleMemorySize / 1MB))
+}
+
+function Mostrar-DiasSinReiniciar {
+    $dias = ((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).Days
+    if ($dias -ge 7) { Escribir-Linea 'Días sin reiniciar' "$dias (reinicia con Inicio > Reiniciar)" 'aviso' }
+    else             { Escribir-Linea 'Días sin reiniciar' $dias 'ok' }
+}
+
+function Mostrar-ReinicioPendiente {
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
+        Escribir-Linea 'Actualizaciones' 'esperando un reinicio' 'aviso'
     } else {
-        Write-Host ('{0,10}' -f 'no') -ForegroundColor DarkGray -NoNewline
-        Write-Host ('  (quedan {0})' -f (Format-Tamano $papelera.Bytes)) -ForegroundColor DarkGray
+        Escribir-Linea 'Actualizaciones' 'sin reinicio pendiente' 'ok'
     }
 }
 
-Write-Host ('   ' + '─' * 58) -ForegroundColor DarkGray
-$etiquetaTotal = if ($Simular) { 'Se liberaría' } else { 'Total liberado' }
-Write-Host ('   {0,-34}' -f $etiquetaTotal) -NoNewline
-Write-Host ('{0,10}' -f (Format-Tamano $totalLiberado)) -ForegroundColor Green
-
-# ─── Revisión del equipo ─────────────────────────────────────────────────────
-
-Write-Seccion 'Revisión del equipo'
-
-$disco = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$env:SystemDrive'"
-$pctDisco = 100 * ($disco.Size - $disco.FreeSpace) / $disco.Size
-Write-Barra "Disco $env:SystemDrive" $pctDisco ('{0} libres de {1}' -f (Format-Tamano $disco.FreeSpace), (Format-Tamano $disco.Size))
-
-$os = Get-CimInstance Win32_OperatingSystem
-$pctRam = 100 * ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize
-Write-Barra 'Memoria' $pctRam ('{0} de {1} en uso' -f (Format-Tamano (($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) * 1KB)), (Format-Tamano ($os.TotalVisibleMemorySize * 1KB)))
-Write-Host ''
-
-if ($pctDisco -ge 90) { Write-Estado mal 'El disco está casi lleno: mueve o borra archivos grandes (Descargas, videos).' }
-elseif ($pctDisco -ge 80) { Write-Estado aviso 'Queda poco espacio en el disco.' }
-
-$encendido = (Get-Date) - $os.LastBootUpTime
-$dias = [int][math]::Floor($encendido.TotalDays)
-if ($dias -ge 7) {
-    Write-Estado aviso "Lleva $dias días sin reiniciar. Usa Inicio > Reiniciar"
-    Write-Host '        ("Apagar" no limpia igual, por el inicio rápido de Windows).' -ForegroundColor DarkGray
-} elseif ($dias -ge 1) {
-    Write-Estado ok ("Reiniciado hace $dias " + $(if ($dias -eq 1) { 'día' } else { 'días' }))
-} else {
-    Write-Estado ok ('Reiniciado hace {0} horas' -f [int][math]::Floor($encendido.TotalHours))
+# Igual que Administrador de tareas > Aplicaciones de arranque, solo las habilitadas.
+function Mostrar-ProgramasInicio {
+    $aprobados = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved'
+    $programas = @(
+        Obtener-InicioRegistro 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'             "HKCU:\$aprobados\Run"
+        Obtener-InicioRegistro 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'             "HKLM:\$aprobados\Run"
+        Obtener-InicioRegistro 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run' "HKLM:\$aprobados\Run32"
+        Obtener-InicioCarpeta ([Environment]::GetFolderPath('Startup'))       "HKCU:\$aprobados\StartupFolder"
+        Obtener-InicioCarpeta ([Environment]::GetFolderPath('CommonStartup')) "HKLM:\$aprobados\StartupFolder"
+    ) | Sort-Object -Unique
+    $tipo = if ($programas.Count -gt 8) { 'aviso' } else { 'ok' }
+    Escribir-Linea 'Arrancan con Windows' ('{0} programas habilitados' -f $programas.Count) $tipo
+    $programas | ForEach-Object { Escribir-Linea '' $_ }
 }
 
-if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
-    Write-Estado aviso 'Windows tiene actualizaciones esperando un reinicio.'
-} else {
-    Write-Estado ok 'Sin actualizaciones pendientes de reinicio'
+# Lo que se borró en total (archivos contados) y lo que realmente ganó el disco (incluye Papelera y Liberador).
+function Mostrar-Resumen($libreAntes) {
+    Escribir-Linea 'Archivos borrados' ('{0} ({1:N1} MB)' -f $script:TotalArchivos, ($script:TotalBytes / 1MB)) 'ok'
+    Escribir-Linea "Espacio ganado en $Unidad" ('{0:N0} MB' -f [math]::Max(0, (Obtener-EspacioLibreMB) - $libreAntes)) 'ok'
 }
 
-$inicio = @(Get-ProgramasInicio | Sort-Object -Unique)
-if ($inicio.Count -eq 0) {
-    Write-Estado ok 'Ningún programa extra arranca con Windows'
-} else {
-    $lista = ($inicio | Select-Object -First 6) -join ', '
-    if ($inicio.Count -gt 6) { $lista += " y $($inicio.Count - 6) más" }
-    $tipo = if ($inicio.Count -gt 8) { 'aviso' } else { 'ok' }
-    Write-Estado $tipo "$($inicio.Count) programas arrancan con Windows: $lista"
-    if ($tipo -eq 'aviso') {
-        Write-Host '        Desactiva los que no uses: Administrador de tareas > Aplicaciones de arranque.' -ForegroundColor DarkGray
+# ════════ LIMPIEZA (un método = una tarea) ════════
+
+function Vaciar-Papelera {
+    $elementos = (New-Object -ComObject Shell.Application).NameSpace(10).Items().Count
+    if ($elementos -eq 0) { Escribir-Linea 'Papelera' 'ya estaba vacía' 'info'; return }
+    if ((Read-Host "   La Papelera tiene $elementos elementos. ¿Vaciarla? (S/N)") -match '^\s*s') {
+        Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+        Escribir-Linea 'Papelera' "$elementos elementos vaciados" 'ok'
+    } else {
+        Escribir-Linea 'Papelera' 'no se vació (respondiste N)' 'info'
     }
 }
 
-$sistema = 'Idle', 'System', 'Secure System', 'Registry', 'Memory Compression'
-$top = Get-Process | Where-Object { $sistema -notcontains $_.ProcessName } | Group-Object ProcessName | ForEach-Object {
-    [pscustomobject]@{ Nombre = $_.Name; Cantidad = $_.Count; Bytes = ($_.Group | Measure-Object WorkingSet64 -Sum).Sum }
-} | Sort-Object Bytes -Descending | Select-Object -First 5
-Write-Host ''
-Write-Host '   Lo que más memoria usa ahora:' -ForegroundColor Gray
-foreach ($programa in $top) {
-    $nombre = if ($programa.Cantidad -gt 1) { '{0} ({1})' -f $programa.Nombre, $programa.Cantidad } else { $programa.Nombre }
-    Write-Host ('      {0,-32}{1,10}' -f $nombre, (Format-Tamano $programa.Bytes))
+function Limpiar-Temp {
+    Borrar-Archivos 'Temporales (%TEMP%)' $env:TEMP $HorasMinimas
 }
 
-Write-Host ''
-Write-Host '   Listo.' -ForegroundColor Green
+function Limpiar-CacheInternet {
+    Borrar-Archivos 'Caché de internet (Windows)' "$Local\Microsoft\Windows\INetCache" $HorasMinimas
+}
+
+function Limpiar-Chrome {
+    Borrar-CacheSiCerrado 'Caché de Chrome' 'chrome' (Obtener-CachesChromium "$Local\Google\Chrome\User Data")
+}
+
+function Limpiar-Edge {
+    Borrar-CacheSiCerrado 'Caché de Edge' 'msedge' (Obtener-CachesChromium "$Local\Microsoft\Edge\User Data")
+}
+
+function Limpiar-Brave {
+    Borrar-CacheSiCerrado 'Caché de Brave' 'brave' (Obtener-CachesChromium "$Local\BraveSoftware\Brave-Browser\User Data")
+}
+
+function Limpiar-Firefox {
+    Borrar-CacheSiCerrado 'Caché de Firefox' 'firefox' "$Local\Mozilla\Firefox\Profiles\*\cache2"
+}
+
+function Limpiar-Teams {
+    Borrar-CacheSiCerrado 'Caché de Teams' 'ms-teams' "$Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams"
+}
+
+# Miniaturas e íconos del Explorador; Windows los vuelve a crear.
+function Limpiar-Miniaturas {
+    Borrar-Archivos 'Miniaturas del Explorador' "$Local\Microsoft\Windows\Explorer\*.db"
+}
+
+# Liberador de espacio de Windows con las opciones guardadas antes con "cleanmgr /sageset:1".
+# No pide admin: sin admin limpia solo lo que tu usuario puede borrar. Si nunca se configuró, no hace nada.
+function Ejecutar-LiberadorEspacio {
+    Ejecutar-Herramienta 'Liberador de espacio' 'cleanmgr.exe' '/sagerun:1'
+}
+
+# ════════ MANTENIMIENTO (solo administrador: Main los salta si no lo eres) ════════
+
+# Temporales de Windows (C:\Windows\Temp). Sin admin Windows ni siquiera deja ver la carpeta.
+function Limpiar-TempWindows {
+    Borrar-Archivos 'Temporales de Windows' "$env:WINDIR\Temp" $HorasMinimas
+}
+
+# --- Solo para tu PC personal ---------------------------------------------------------------
+# Estos borran rastros de uso (informes de errores, historial, cookies, recientes). En un PC de
+# empresa el antivirus lo puede ver como "borrado de evidencia"; por eso solo corren como admin,
+# y en la laptop del banco no tienes admin.
+
+# Volcados de programas que se cerraron con error, e informes pendientes de enviar a Microsoft.
+function Limpiar-ReportesErrores {
+    Borrar-Archivos 'Informes de errores' "$Local\CrashDumps", "$Local\Microsoft\Windows\WER\ReportQueue"
+}
+
+# Historial del antiguo Internet Explorer / Explorador de Windows.
+function Limpiar-Historial {
+    Borrar-Archivos 'Historial de Windows' "$Local\Microsoft\Windows\History"
+}
+
+# Cookies del antiguo Internet Explorer (en Windows 11 casi siempre está vacía).
+function Limpiar-Cookies {
+    Borrar-Archivos 'Cookies de Windows' "$env:APPDATA\Microsoft\Windows\Cookies"
+}
+
+# Archivos recientes del Explorador. También borra lo anclado en las listas de la barra de tareas.
+function Limpiar-Recientes {
+    Borrar-Archivos 'Archivos recientes' "$env:APPDATA\Microsoft\Windows\Recent"
+}
+# ----------------------------------------------------------------------------------------------
+
+# DISM: borra versiones viejas de actualizaciones de Windows (carpeta WinSxS). Tarda varios minutos.
+function Limpiar-ComponentesWindows {
+    Ejecutar-Herramienta 'DISM (WinSxS)' 'Dism.exe' '/Online /Cleanup-Image /StartComponentCleanup'
+}
+
+# TRIM: deja que el disco SSD sepa qué espacio quedó libre. En Windows 11 ya viene activado.
+function Activar-Trim {
+    Ejecutar-Herramienta 'Activar TRIM' 'fsutil.exe' 'behavior set DisableDeleteNotify 0'
+}
+
+# Desfragmenta los discos normales y hace TRIM en los SSD (todos los discos del equipo).
+function Optimizar-Discos {
+    Ejecutar-Herramienta 'Optimizar discos' 'defrag.exe' '/C /O'
+}
+
+# ════════ MAIN ════════
+
+function Main {
+    Escribir-Encabezado 'OPTIMIZAR PC'
+
+    # 1. Primero: ¿con qué permisos corre? Eso decide qué se puede hacer.
+    $esAdmin = Es-Administrador
+    if ($esAdmin) { Escribir-Linea 'Modo' 'administrador: limpieza + mantenimiento' 'ok' }
+    else          { Escribir-Linea 'Modo' 'normal: solo limpieza (el mantenimiento pide admin)' 'info' }
+    $libreAntes = Obtener-EspacioLibreMB
+
+    # 2. Limpieza. La Papelera va primero porque es lo único que pregunta; el resto corre sin interrupciones.
+    Escribir-Titulo 'Limpieza'
+    Vaciar-Papelera
+    Limpiar-Temp
+    Limpiar-CacheInternet
+    Limpiar-Chrome
+    Limpiar-Edge
+    Limpiar-Brave
+    Limpiar-Firefox
+    Limpiar-Teams
+    Limpiar-Miniaturas
+    Ejecutar-LiberadorEspacio
+
+    # 3. Mantenimiento: después de borrar, para que DISM y la optimización trabajen sobre el disco ya limpio.
+    #    Optimizar-Discos va último porque reorganiza el espacio que dejó libre todo lo anterior.
+    if ($esAdmin) {
+        Escribir-Titulo 'Mantenimiento'
+        Limpiar-TempWindows
+        Limpiar-ReportesErrores
+        Limpiar-Historial
+        Limpiar-Cookies
+        Limpiar-Recientes
+        Limpiar-ComponentesWindows
+        Activar-Trim
+        Optimizar-Discos
+    }
+
+    # 4. Resumen de lo borrado, y revisión del equipo ya limpio.
+    Escribir-Titulo 'Resumen'
+    Mostrar-Resumen $libreAntes
+
+    Escribir-Titulo 'Revisión del equipo'
+    Mostrar-Disco
+    Mostrar-Memoria
+    Mostrar-DiasSinReiniciar
+    Mostrar-ReinicioPendiente
+    Mostrar-ProgramasInicio
+
+    Escribir-Titulo 'Listo'
+}
+
+Main
