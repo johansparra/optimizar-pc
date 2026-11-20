@@ -1,6 +1,21 @@
-﻿# Optimizar-PC.ps1 - Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo.
-# Doble clic: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows.
-# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > REVISIÓN > LIMPIEZA > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+﻿<#PSScriptInfo
+.VERSION 1.0.0
+.GUID 81b2e606-23df-4e75-8725-5df78a0609fc
+.AUTHOR johansparra
+.PROJECTURI https://github.com/johansparra/memory
+.RELEASENOTES
+1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
+#>
+
+<#
+.SYNOPSIS
+Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo.
+.DESCRIPTION
+Doble clic en Optimizar-PC.bat: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows.
+.NOTES
+Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > REVISIÓN > LIMPIEZA > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+Versión y notas de versión: bloque PSScriptInfo de arriba (se mantiene con la skill actualizar-version-scripts).
+#>
 
 # ════════ CHEQUEO INICIAL ════════
 

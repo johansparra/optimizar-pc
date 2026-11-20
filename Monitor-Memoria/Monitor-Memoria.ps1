@@ -1,6 +1,21 @@
-﻿# Monitor-Memoria.ps1 - Ícono junto al reloj con el % de RAM en uso. Sin administrador.
-# Doble clic en el ícono: liberar memoria. Clic derecho: menú (liberar, limpieza automática, Administrador de tareas, Salir).
-# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
+﻿<#PSScriptInfo
+.VERSION 1.0.0
+.GUID 4b276250-ee71-40e3-9732-65f50b5d5cb3
+.AUTHOR johansparra
+.PROJECTURI https://github.com/johansparra/memory
+.RELEASENOTES
+1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
+#>
+
+<#
+.SYNOPSIS
+Ícono junto al reloj con el % de RAM en uso.
+.DESCRIPTION
+Doble clic en Monitor-Memoria.bat. No necesita administrador. Doble clic en el ícono: liberar memoria. Clic derecho: menú (liberar, limpieza automática, Administrador de tareas, Salir).
+.NOTES
+Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
+Versión y notas de versión: bloque PSScriptInfo de arriba (se mantiene con la skill actualizar-version-scripts).
+#>
 
 # ════════ CHEQUEO INICIAL ════════
 

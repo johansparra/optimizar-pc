@@ -1,5 +1,21 @@
-﻿# Limpiar-Memoria.ps1 - Libera la RAM que no usan los programas de la lista y muestra el antes y el después. Sin administrador.
-# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
+﻿<#PSScriptInfo
+.VERSION 1.0.0
+.GUID e49baf6a-99cc-467b-ad34-0a4460f93c32
+.AUTHOR johansparra
+.PROJECTURI https://github.com/johansparra/memory
+.RELEASENOTES
+1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
+#>
+
+<#
+.SYNOPSIS
+Libera la RAM que no usan los programas de la lista y muestra el antes y el después.
+.DESCRIPTION
+Doble clic en Limpiar-Memoria.bat. No necesita administrador: solo toca los programas de la lista $Programas abiertos en tu sesión (nada de Windows, antivirus, VPN ni Zscaler).
+.NOTES
+Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
+Versión y notas de versión: bloque PSScriptInfo de arriba (se mantiene con la skill actualizar-version-scripts).
+#>
 
 # ════════ CHEQUEO INICIAL ════════
 

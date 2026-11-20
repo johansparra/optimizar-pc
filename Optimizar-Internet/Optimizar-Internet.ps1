@@ -1,6 +1,21 @@
-﻿# Optimizar-Internet.ps1 - Renueva la IP (si no hay VPN), revisa la conexión paso a paso y, como admin, hace el mantenimiento de red.
-# Doble clic: renovar IP y diagnóstico. Clic derecho > Ejecutar como administrador: también mantenimiento y tus ajustes.
-# Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > CONEXIÓN Y DIAGNÓSTICO > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+﻿<#PSScriptInfo
+.VERSION 1.0.0
+.GUID 5a4e60f0-e762-43fe-b7e2-b4af84d52483
+.AUTHOR johansparra
+.PROJECTURI https://github.com/johansparra/memory
+.RELEASENOTES
+1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
+#>
+
+<#
+.SYNOPSIS
+Renueva la IP (si no hay VPN), revisa la conexión paso a paso y, como admin, hace el mantenimiento de red.
+.DESCRIPTION
+Doble clic en Optimizar-Internet.bat: renovar IP y diagnóstico. Clic derecho > Ejecutar como administrador: también mantenimiento y tus ajustes de red.
+.NOTES
+Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > CONEXIÓN Y DIAGNÓSTICO > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+Versión y notas de versión: bloque PSScriptInfo de arriba (se mantiene con la skill actualizar-version-scripts).
+#>
 
 # ════════ CHEQUEO INICIAL ════════
 

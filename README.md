@@ -36,6 +36,7 @@ Get-ExecutionPolicy -List
 
 Todos siguen el mismo orden, de arriba abajo:
 
+0. **Bloques de información** (solo comentarios): versión, autor y notas de versión (`<#PSScriptInfo`), y la ayuda que muestra `Get-Help .\Optimizar-PC\Optimizar-PC.ps1`. Al cambiar un script se sube su versión y se anota qué cambió; la skill `actualizar-version-scripts` (en `.claude/skills`) lo hace con Claude Code.
 1. **CHEQUEO INICIAL:** se detiene si PowerShell está restringido.
 2. **CONFIGURACIÓN:** lo que puedes cambiar sin tocar el resto. Por ejemplo, la lista `$Programas`, las horas mínimas de los temporales, los límites de los pings o tus ajustes TCP y DNS.
 3. **VISTA:** todo lo visual (títulos, colores y barras). Los demás métodos solo dicen el tipo de resultado (`ok`, `aviso`, `mal` o `info`), y la VISTA decide el color.
