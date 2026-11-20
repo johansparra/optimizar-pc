@@ -1,9 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.0.0
+.VERSION 1.0.1
 .GUID 4b276250-ee71-40e3-9732-65f50b5d5cb3
 .AUTHOR johansparra
-.PROJECTURI https://github.com/johansparra/memory
+.PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
+1.0.1 (2026-11-19): enlace del proyecto actualizado al nuevo nombre del repositorio en GitHub (optimizar-pc).
 1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
 #>
 

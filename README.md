@@ -1,4 +1,4 @@
-# Memory
+# optimizar-pc
 
 Herramientas para Windows pensadas para un PC corporativo (con VPN Cisco y Zscaler). Cada una está en su carpeta, funciona sola y se abre con doble clic en su `.bat`.
 

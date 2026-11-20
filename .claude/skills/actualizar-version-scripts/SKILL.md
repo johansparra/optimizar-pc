@@ -26,7 +26,7 @@ En cada cambio a un `.ps1`, antes del commit. Si el cambio toca varios scripts, 
    `x.y.z (AAAA-MM-DD): qué cambió, en una frase en español.`
    Nunca borres las líneas anteriores: son el historial.
 3. **Si cambió lo que hace el script**, actualiza `.SYNOPSIS` y `.DESCRIPTION`. Si cambió el orden de las secciones, actualiza la línea "Orden del archivo" en `.NOTES`.
-4. **No toques** `.GUID` (es la identidad del script y nunca cambia), `.AUTHOR` ni `.PROJECTURI`.
+4. **No toques** `.GUID` (es la identidad del script y nunca cambia) ni `.AUTHOR`. `.PROJECTURI` solo cambia si el repositorio de GitHub cambia de nombre (eso es un **parche**).
 5. **Valida** en PowerShell 7 (en PowerShell 5.1 no existe el comando). Cada script debe dar `True`:
 
    ```powershell
