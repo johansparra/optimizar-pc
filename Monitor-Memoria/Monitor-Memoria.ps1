@@ -1,9 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.0.1
+.VERSION 1.0.2
 .GUID 4b276250-ee71-40e3-9732-65f50b5d5cb3
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
+1.0.2 (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, el catch vacío ahora deja nota, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.
 1.0.1 (2026-11-19): enlace del proyecto actualizado al nuevo nombre del repositorio en GitHub (optimizar-pc).
 1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
 #>
@@ -17,6 +18,9 @@ Doble clic en Monitor-Memoria.bat. No necesita administrador. Doble clic en el �
 Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
 Versión y notas de versión: bloque PSScriptInfo de arriba (se mantiene con la skill actualizar-version-scripts).
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Los colores en la consola son la interfaz: el script se abre con doble clic.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Se abre con doble clic: nadie usa -WhatIf ni -Confirm.')]
+param()
 
 # ════════ CHEQUEO INICIAL ════════
 
@@ -149,7 +153,7 @@ function Get-RamDetail {
 # Solo los programas de la lista abiertos en tu sesión.
 function Clear-ProgramsRam {
     Get-Process -Name $Programas -ErrorAction SilentlyContinue | Where-Object SessionId -eq $Sesion |
-        ForEach-Object { try { $_.MaxWorkingSet = $_.MaxWorkingSet } catch {} }
+        ForEach-Object { try { $_.MaxWorkingSet = $_.MaxWorkingSet } catch { Write-Verbose "Se salta (sin permiso o ya cerrado): $_" } }
 }
 
 # $true si ya hay otro monitor abierto (los dos usan el mismo candado).
@@ -224,10 +228,10 @@ function Main {
 
     # 4. Explicar en esta ventana cómo se usa, y esperar hasta que elijan Salir.
     Write-Header 'MONITOR DE MEMORIA'
-    Write-Line 'Estado' 'activo: mira el ícono junto al reloj' 'ok'
+    Write-Line 'Estado' 'activo: mira el ícono junto al reloj' -tipo 'ok'
     Write-Line 'Liberar memoria' 'doble clic en el ícono'
     Write-Line 'Más opciones' 'clic derecho en el ícono (limpieza automática, Salir...)'
-    Write-Line 'Esta ventana' 'déjala minimizada; si la cierras, el monitor se cierra' 'info'
+    Write-Line 'Esta ventana' 'déjala minimizada; si la cierras, el monitor se cierra' -tipo 'info'
     [System.Windows.Forms.Application]::Run()
     $Candado.ReleaseMutex()
 }

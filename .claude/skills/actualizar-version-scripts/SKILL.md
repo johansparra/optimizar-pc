@@ -1,6 +1,6 @@
 ---
 name: actualizar-version-scripts
-description: Úsala cada vez que cambies un .ps1 de este repo (Limpiar-Memoria, Monitor-Memoria, Optimizar-Internet, Optimizar-PC) y antes de hacer commit de esos cambios. Sube la .VERSION, agrega la nota en .RELEASENOTES, mantiene .SYNOPSIS/.DESCRIPTION al día y valida con Test-PSScriptFileInfo.
+description: Úsala cada vez que cambies un .ps1 de este repo (Limpiar-Memoria, Monitor-Memoria, Optimizar-Internet, Optimizar-PC) y antes de hacer commit de esos cambios. Sube la .VERSION, agrega la nota en .RELEASENOTES, mantiene .SYNOPSIS/.DESCRIPTION al día y valida con Test-PSScriptFileInfo y PSScriptAnalyzer (incluida la compatibilidad con PowerShell 5.1).
 ---
 
 # Mantener al día el bloque PSScriptInfo
@@ -34,16 +34,30 @@ En cada cambio a un `.ps1`, antes del commit. Si el cambio toca varios scripts, 
        ForEach-Object { '{0}: {1}' -f $_.Name, (Test-PSScriptFileInfo $_.FullName) }
    ```
 
-6. **Revisa la codificación**: cada `.ps1` debe seguir en UTF-8 **con BOM** y finales de línea CRLF. Sin BOM, PowerShell 5.1 de la laptop lee mal los acentos. En Git Bash:
+6. **Analiza el código** con PSScriptAnalyzer, también en PowerShell 7. Usa las reglas de [audit/PSScriptAnalyzerSettings.psd1](../../../audit/PSScriptAnalyzerSettings.psd1): todas las reglas normales y, además, avisa si algo solo existe en PowerShell 7 (los `.bat` abren los scripts con PowerShell 5.1). Desde la raíz del repo:
+
+   ```powershell
+   Get-ChildItem -Recurse -Filter *.ps1 | Where-Object FullName -notmatch '\\RAMMap\\' |
+       ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Settings .\audit\PSScriptAnalyzerSettings.psd1 } |
+       Format-Table ScriptName, Line, Severity, RuleName, Message -AutoSize -Wrap
+   ```
+
+   **No debe salir nada**: cualquier aviso se arregla antes del commit. Las costumbres que lo mantienen limpio:
+   - En las llamadas a funciones del script, del 3.er argumento en adelante va con nombre: `Write-Line 'Modo' 'normal' -tipo 'info'`.
+   - Nombres de función en singular (`Remove-OldFile`, no `Remove-OldFiles`).
+   - Nada de `catch {}` vacío: si el error se ignora a propósito, deja `Write-Verbose` con el motivo.
+   - `Write-Host` y la falta de `-WhatIf` ya están marcados como intencionales con `SuppressMessageAttribute` encima de `param()`. Solo agrega otra marca así si de verdad es a propósito, con su `Justification`, y explícala en [audit/PSScriptAnalyzer.md](../../../audit/PSScriptAnalyzer.md).
+
+7. **Revisa la codificación**: cada `.ps1` debe seguir en UTF-8 **con BOM** y finales de línea CRLF. Sin BOM, PowerShell 5.1 de la laptop lee mal los acentos. En Git Bash:
 
    ```bash
    file */*.ps1   # debe decir "UTF-8 (with BOM) text, with CRLF line terminators"
    ```
 
-7. **En el mensaje de commit**, nombra la versión nueva de cada script (por ejemplo `Optimizar-PC 1.1.0`).
+8. **En el mensaje de commit**, nombra la versión nueva de cada script (por ejemplo `Optimizar-PC 1.1.0`).
 
 ## No hagas
 
 - **No uses `Update-PSScriptFileInfo`.** Quita el BOM del archivo, reemplaza las notas de versión anteriores en vez de agregar y llena el bloque de campos vacíos. Edita el bloque a mano.
-- **No instales PSResourceGet ni valides en la laptop del banco.** La validación se hace solo en el PC personal.
+- **No instales PSResourceGet ni PSScriptAnalyzer, ni valides o analices en la laptop del banco.** La validación se hace solo en el PC personal.
 - **No subas la versión de un script que no cambió**, aunque se cambien otros en el mismo commit.

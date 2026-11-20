@@ -1,9 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.0.1
+.VERSION 1.0.2
 .GUID e49baf6a-99cc-467b-ad34-0a4460f93c32
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
+1.0.2 (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, funciones en singular, Write-Host marcado como intencional). El script hace lo mismo.
 1.0.1 (2026-11-19): enlace del proyecto actualizado al nuevo nombre del repositorio en GitHub (optimizar-pc).
 1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
 #>
@@ -17,6 +18,8 @@ Doble clic en Limpiar-Memoria.bat. No necesita administrador: solo toca los prog
 Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > ACCIONES > MAIN (al final, como en Java).
 Versión y notas de versión: bloque PSScriptInfo de arriba (se mantiene con la skill actualizar-version-scripts).
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Los colores en la consola son la interfaz: el script se abre con doble clic.')]
+param()
 
 # ════════ CHEQUEO INICIAL ════════
 
@@ -80,7 +83,7 @@ function Get-FreeRamMB {
 }
 
 # Los programas de la lista abiertos en TU sesión (no los de otros usuarios conectados al mismo PC).
-function Get-SessionPrograms {
+function Get-SessionProgram {
     $sesion = (Get-Process -Id $PID).SessionId
     @(Get-Process -Name $Programas -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sesion)
 }
@@ -97,15 +100,15 @@ function Clear-ProcessRam($proceso) {
 function Show-Memory($momento) {
     $os = Get-CimInstance Win32_OperatingSystem
     $usadaKB = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-    Write-Bar $momento (100 * $usadaKB / $os.TotalVisibleMemorySize) ('{0:N1} GB de {1:N1} GB en uso' -f ($usadaKB / 1MB), ($os.TotalVisibleMemorySize / 1MB))
+    Write-Bar $momento (100 * $usadaKB / $os.TotalVisibleMemorySize) -detalle ('{0:N1} GB de {1:N1} GB en uso' -f ($usadaKB / 1MB), ($os.TotalVisibleMemorySize / 1MB))
 }
 
 # Libera la RAM de cada proceso, reporta cuántos lo lograron y devuelve esos procesos.
 function Clear-ProgramsRam($procesos) {
     $limpiados = @($procesos | Where-Object { Clear-ProcessRam $_ })
-    Write-Line 'Procesos limpiados' $limpiados.Count 'ok'
+    Write-Line 'Procesos limpiados' $limpiados.Count -tipo 'ok'
     $sinPermiso = $procesos.Count - $limpiados.Count
-    if ($sinPermiso) { Write-Line 'Sin permiso' "$sinPermiso (abiertos como administrador)" 'info' }
+    if ($sinPermiso) { Write-Line 'Sin permiso' "$sinPermiso (abiertos como administrador)" -tipo 'info' }
     $limpiados
 }
 
@@ -119,13 +122,13 @@ function Show-ReleasedByProgram($procesos) {
         $ahoraMB = ($_.Group | ForEach-Object { [long]$ahora[$_.Id] } | Measure-Object -Sum).Sum / 1MB   # cerrado = 0
         [pscustomobject]@{ Nombre = '{0} ({1})' -f $_.Name, $_.Count; Antes = $antesMB; Ahora = $ahoraMB; Solto = $antesMB - $ahoraMB }
     } | Where-Object Solto -ge 1 | Sort-Object Solto -Descending | Select-Object -First 8 |
-        ForEach-Object { Write-Line "  $($_.Nombre)" ('{0:N0} MB  (de {1:N0} a {2:N0} MB)' -f $_.Solto, $_.Antes, $_.Ahora) 'ok' }
+        ForEach-Object { Write-Line "  $($_.Nombre)" ('{0:N0} MB  (de {1:N0} a {2:N0} MB)' -f $_.Solto, $_.Antes, $_.Ahora) -tipo 'ok' }
 }
 
 function Show-FreedRam($libreAntesMB) {
     $liberada = (Get-FreeRamMB) - $libreAntesMB
-    if ($liberada -ge 50) { Write-Line 'RAM liberada' ('{0:N0} MB' -f $liberada) 'ok' }
-    else                  { Write-Line 'RAM liberada' 'poca: tus programas ya usaban poca memoria' 'info' }
+    if ($liberada -ge 50) { Write-Line 'RAM liberada' ('{0:N0} MB' -f $liberada) -tipo 'ok' }
+    else                  { Write-Line 'RAM liberada' 'poca: tus programas ya usaban poca memoria' -tipo 'info' }
 }
 
 function Show-TopMemory {
@@ -141,7 +144,7 @@ function Show-TopMemory {
 function Main {
     Write-Header 'LIMPIAR MEMORIA RAM'
     $libreAntes = Get-FreeRamMB
-    $procesos = Get-SessionPrograms   # cada proceso guarda la RAM que tenía en este momento
+    $procesos = Get-SessionProgram   # cada proceso guarda la RAM que tenía en este momento
 
     # 1. Antes, liberar, después.
     Write-Title 'Memoria'

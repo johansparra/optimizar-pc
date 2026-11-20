@@ -1,9 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.0.1
+.VERSION 1.0.2
 .GUID 5a4e60f0-e762-43fe-b7e2-b4af84d52483
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
+1.0.2 (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, funciones en singular, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.
 1.0.1 (2026-11-19): enlace del proyecto actualizado al nuevo nombre del repositorio en GitHub (optimizar-pc).
 1.0.0 (2026-11-19): primera versión con este bloque. Estructura por métodos, VISTA, chequeo de PowerShell restringido y bloque de administrador.
 #>
@@ -17,6 +18,9 @@ Doble clic en Optimizar-Internet.bat: renovar IP y diagnóstico. Clic derecho > 
 Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > CONEXIÓN Y DIAGNÓSTICO > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
 Versión y notas de versión: bloque PSScriptInfo de arriba (se mantiene con la skill actualizar-version-scripts).
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Los colores en la consola son la interfaz: el script se abre con doble clic.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Se abre con doble clic: nadie usa -WhatIf ni -Confirm.')]
+param()
 
 # ════════ CHEQUEO INICIAL ════════
 
@@ -89,7 +93,7 @@ function Test-Admin {
 }
 
 # Cable y Wi-Fi conectados.
-function Get-PhysicalAdapters {
+function Get-PhysicalAdapter {
     @(Get-NetAdapter -Physical | Where-Object Status -eq 'Up')
 }
 
@@ -105,38 +109,38 @@ function Get-Vpn($fisicos) {
 # Rojo: se pierde la mitad o más, o tardan más de $msMal.
 function Test-Ping($nombre, $destino, $msAviso, $msMal) {
     $respuestas = @(Test-Connection $destino -Count 4 -ErrorAction SilentlyContinue)
-    if ($respuestas.Count -eq 0) { Write-Line $nombre "$destino no responde (algunos equipos bloquean el ping)" 'aviso'; return }
+    if ($respuestas.Count -eq 0) { Write-Line $nombre "$destino no responde (algunos equipos bloquean el ping)" -tipo 'aviso'; return }
     $promedio = ($respuestas | Measure-Object ResponseTime -Average).Average
     $tipo = if ($respuestas.Count -le 2 -or $promedio -gt $msMal) { 'mal' }
             elseif ($respuestas.Count -lt 4 -or $promedio -gt $msAviso) { 'aviso' }
             else { 'ok' }
-    Write-Line $nombre ('{0}: {1} de 4 respuestas, {2:N0} ms' -f $destino, $respuestas.Count, $promedio) $tipo
+    Write-Line $nombre ('{0}: {1} de 4 respuestas, {2:N0} ms' -f $destino, $respuestas.Count, $promedio) -tipo $tipo
 }
 
 # Ejecuta uno o varios comandos escritos igual que en un .cmd, oculta su texto y reporta si salieron bien.
-function Invoke-CmdLines($nombre, $comandos) {
+function Invoke-CmdLine($nombre, $comandos) {
     $fallidos = @()
     foreach ($comando in $comandos) {
         $null = cmd /c "$comando 2>&1"
         if ($LASTEXITCODE -ne 0) { $fallidos += $comando }
     }
-    if (-not $fallidos) { Write-Line $nombre 'OK' 'ok' }
-    else                { Write-Line $nombre ('falló: ' + ($fallidos -join ' | ')) 'mal' }
+    if (-not $fallidos) { Write-Line $nombre 'OK' -tipo 'ok' }
+    else                { Write-Line $nombre ('falló: ' + ($fallidos -join ' | ')) -tipo 'mal' }
 }
 
 # ════════ CONEXIÓN Y DIAGNÓSTICO (sin admin; un método = una tarea) ════════
 
 function Update-IP($adaptador) {
     $null = ipconfig /renew "$($adaptador.Name)" 2>&1   # nunca /release: ese corta la conexión
-    if ($LASTEXITCODE -eq 0) { Write-Line "Renovar IP: $($adaptador.Name)" 'OK' 'ok' }
-    else                     { Write-Line "Renovar IP: $($adaptador.Name)" 'no se renovó (puede tener IP fija)' 'aviso' }
+    if ($LASTEXITCODE -eq 0) { Write-Line "Renovar IP: $($adaptador.Name)" 'OK' -tipo 'ok' }
+    else                     { Write-Line "Renovar IP: $($adaptador.Name)" 'no se renovó (puede tener IP fija)' -tipo 'aviso' }
 }
 
 function Show-Connection($adaptador) {
     $c = Get-NetIPConfiguration -InterfaceIndex $adaptador.ifIndex
     # Cable (NdisPhysicalMedium 14 = Ethernet) conectado a menos de 1 Gbps: suele ser el cable o el puerto.
     if ($adaptador.NdisPhysicalMedium -eq 14 -and $adaptador.ReceiveLinkSpeed -lt 1e9) {
-        Write-Line $adaptador.Name "$($adaptador.LinkSpeed) (si tu plan es más rápido, cambia el cable a Cat 5e o más, o el puerto)" 'aviso'
+        Write-Line $adaptador.Name "$($adaptador.LinkSpeed) (si tu plan es más rápido, cambia el cable a Cat 5e o más, o el puerto)" -tipo 'aviso'
     } else {
         Write-Line $adaptador.Name $adaptador.LinkSpeed
     }
@@ -161,7 +165,7 @@ function Show-Wifi {
             $senal = [int]($valor -replace '\D')
             $tipo = if ($senal -lt 40) { 'mal' } elseif ($senal -lt 70) { 'aviso' } else { 'ok' }
         }
-        Write-Line "  $nombre" $valor $tipo
+        Write-Line "  $nombre" $valor -tipo $tipo
     }
 }
 
@@ -171,61 +175,61 @@ function Test-NetService($nombre, $servicio) {
         Start-Service $servicio -ErrorAction SilentlyContinue
     }
     $estado = (Get-Service $servicio).Status
-    if ($estado -eq 'Running') { Write-Line $nombre 'en ejecución' 'ok' }
-    else                       { Write-Line $nombre "$estado (como admin se intenta iniciar)" 'mal' }
+    if ($estado -eq 'Running') { Write-Line $nombre 'en ejecución' -tipo 'ok' }
+    else                       { Write-Line $nombre "$estado (como admin se intenta iniciar)" -tipo 'mal' }
 }
 
 # Un ping por router, aunque el cable y el Wi-Fi usen el mismo.
 function Test-Router($adaptadores) {
     $routers = $adaptadores | ForEach-Object { (Get-NetIPConfiguration -InterfaceIndex $_.ifIndex).IPv4DefaultGateway.NextHop } | Sort-Object -Unique
-    foreach ($router in $routers) { Test-Ping 'Ping al router' $router $MsRouter $MsRouterMalo }
+    foreach ($router in $routers) { Test-Ping 'Ping al router' $router -msAviso $MsRouter -msMal $MsRouterMalo }
 }
 
 function Test-Internet {
-    Test-Ping 'Ping a internet' $ServidorInternet $MsInternet $MsInternetMalo
+    Test-Ping 'Ping a internet' $ServidorInternet -msAviso $MsInternet -msMal $MsInternetMalo
 }
 
 # Basta con que una conexión tenga internet (con VPN, la salida va por la VPN y las demás quedan como red local).
 function Show-InternetAccess {
     $conInternet = @(Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv6Connectivity -eq 'Internet' })
-    if ($conInternet) { Write-Line 'Windows ve internet' ('sí, por ' + ($conInternet.InterfaceAlias -join ', ')) 'ok' }
-    else              { Write-Line 'Windows ve internet' 'no: hay red, pero no salida a internet' 'mal' }
+    if ($conInternet) { Write-Line 'Windows ve internet' ('sí, por ' + ($conInternet.InterfaceAlias -join ', ')) -tipo 'ok' }
+    else              { Write-Line 'Windows ve internet' 'no: hay red, pero no salida a internet' -tipo 'mal' }
 }
 
-function Test-Dns {
+function Test-DnsResolution {
     $reloj = [Diagnostics.Stopwatch]::StartNew()
     $respuesta = Resolve-DnsName $PaginaPruebaDns -Type A -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue
-    if ($respuesta) { Write-Line 'DNS' ('responde ({0:N0} ms)' -f $reloj.Elapsed.TotalMilliseconds) 'ok' }
-    else            { Write-Line 'DNS' 'no responde' 'mal' }
+    if ($respuesta) { Write-Line 'DNS' ('responde ({0:N0} ms)' -f $reloj.Elapsed.TotalMilliseconds) -tipo 'ok' }
+    else            { Write-Line 'DNS' 'no responde' -tipo 'mal' }
 }
 
 # ════════ MANTENIMIENTO (solo administrador: Main los salta si no lo eres) ════════
 
 function Clear-DnsCache {
-    Invoke-CmdLines 'Vaciar caché DNS' 'ipconfig /flushdns'
+    Invoke-CmdLine 'Vaciar caché DNS' 'ipconfig /flushdns'
 }
 
 function Clear-NetbiosCache {
-    Invoke-CmdLines 'Vaciar caché NetBIOS' 'nbtstat -R', 'nbtstat -RR'
+    Invoke-CmdLine 'Vaciar caché NetBIOS' 'nbtstat -R', 'nbtstat -RR'
 }
 
 function Clear-ArpCache {
-    Invoke-CmdLines 'Vaciar caché ARP' 'arp -d *'
+    Invoke-CmdLine 'Vaciar caché ARP' 'arp -d *'
 }
 
 # La lista está en CONFIGURACIÓN ($AjustesTcp).
-function Set-TcpTweaks {
-    Invoke-CmdLines 'Ajustes TCP' $AjustesTcp
+function Set-TcpSetting {
+    Invoke-CmdLine 'Ajustes TCP' $AjustesTcp
 }
 
 # Teredo: túnel IPv6 antiguo. Ojo: el chat de grupo de la app Xbox lo necesita.
 function Disable-Teredo {
-    Invoke-CmdLines 'Desactivar Teredo' 'netsh interface teredo set state disabled'
+    Invoke-CmdLine 'Desactivar Teredo' 'netsh interface teredo set state disabled'
 }
 
 # DNS fijo en el adaptador de CONFIGURACIÓN ($AdaptadorDns, $DnsPrimario, $DnsSecundario).
-function Set-StaticDns {
-    Invoke-CmdLines "DNS fijo en $AdaptadorDns" @(
+function Set-StaticDnsServer {
+    Invoke-CmdLine "DNS fijo en $AdaptadorDns" @(
         ('netsh interface ip set dns name="{0}" static {1}' -f $AdaptadorDns, $DnsPrimario)
         ('netsh interface ip add dns name="{0}" {1} index=2' -f $AdaptadorDns, $DnsSecundario)
     )
@@ -239,19 +243,19 @@ function Confirm-DeepRepair {
 
 # Ojo: borra las reglas que tus programas agregaron al firewall de Windows (las vuelven a pedir).
 function Reset-Firewall {
-    Invoke-CmdLines 'Restablecer firewall' 'netsh advfirewall reset'
+    Invoke-CmdLine 'Restablecer firewall' 'netsh advfirewall reset'
 }
 
 function Reset-IP {
-    Invoke-CmdLines 'Restablecer IP' 'netsh int ipv4 reset', 'netsh int ip reset'
+    Invoke-CmdLine 'Restablecer IP' 'netsh int ipv4 reset', 'netsh int ip reset'
 }
 
 function Reset-Winsock {
-    Invoke-CmdLines 'Restablecer Winsock' 'netsh winsock reset'
+    Invoke-CmdLine 'Restablecer Winsock' 'netsh winsock reset'
 }
 
 function Reset-Proxy {
-    Invoke-CmdLines 'Restablecer proxy (WinHTTP)' 'netsh winhttp reset proxy'
+    Invoke-CmdLine 'Restablecer proxy (WinHTTP)' 'netsh winhttp reset proxy'
 }
 # ------------------------------------------------------------------------------------------------
 
@@ -262,12 +266,12 @@ function Main {
 
     # 1. Primero: permisos, conexión y VPN. Eso decide qué se puede hacer.
     $esAdmin = Test-Admin
-    if ($esAdmin) { Write-Line 'Modo' 'administrador: diagnóstico + mantenimiento de red' 'ok' }
-    else          { Write-Line 'Modo' 'normal: renovar IP y diagnóstico (el mantenimiento pide admin)' 'info' }
-    $fisicos = Get-PhysicalAdapters
-    if (-not $fisicos) { Write-Line 'Conexión' 'no hay cable ni Wi-Fi conectado' 'mal'; return }
+    if ($esAdmin) { Write-Line 'Modo' 'administrador: diagnóstico + mantenimiento de red' -tipo 'ok' }
+    else          { Write-Line 'Modo' 'normal: renovar IP y diagnóstico (el mantenimiento pide admin)' -tipo 'info' }
+    $fisicos = Get-PhysicalAdapter
+    if (-not $fisicos) { Write-Line 'Conexión' 'no hay cable ni Wi-Fi conectado' -tipo 'mal'; return }
     $vpn = Get-Vpn $fisicos
-    if ($vpn) { Write-Line 'VPN conectada' $vpn[0].InterfaceDescription 'info' }
+    if ($vpn) { Write-Line 'VPN conectada' $vpn[0].InterfaceDescription -tipo 'info' }
 
     # 2. La única pregunta va al principio; el resto corre sin interrupciones. Con VPN no se ofrece.
     $reparar = $false
@@ -275,7 +279,7 @@ function Main {
 
     # 3. Renovar la IP antes de tocar nada más, mientras la red está sana. Con VPN se salta para no cortarla.
     Write-Title 'Renovar conexión'
-    if ($vpn) { Write-Line 'Renovar IP' 'se salta para no cortar la VPN' 'info' }
+    if ($vpn) { Write-Line 'Renovar IP' 'se salta para no cortar la VPN' -tipo 'info' }
     else      { foreach ($a in $fisicos) { Update-IP $a } }
 
     # 4. Mantenimiento (solo admin), en el orden de tu .cmd: primero restablecer, luego vaciar cachés
@@ -291,9 +295,9 @@ function Main {
         Clear-DnsCache
         Clear-NetbiosCache
         Clear-ArpCache
-        Set-TcpTweaks
+        Set-TcpSetting
         Disable-Teredo
-        Set-StaticDns
+        Set-StaticDnsServer
     }
 
     # 5. Datos y diagnóstico con todo ya aplicado, de lo más cercano (servicios, router) a lo más lejano (internet, DNS).
@@ -305,12 +309,12 @@ function Main {
     Test-NetService 'Servicio DHCP' 'Dhcp'
     Test-NetService 'Servicio Cliente DNS' 'Dnscache'
     Test-Router $fisicos
-    if ($vpn) { Write-Line 'Ping a internet' 'se salta con VPN' 'info' }
+    if ($vpn) { Write-Line 'Ping a internet' 'se salta con VPN' -tipo 'info' }
     else      { Test-Internet }
     Show-InternetAccess
-    Test-Dns
+    Test-DnsResolution
 
-    if ($reparar) { Write-Line 'Reparación profunda' 'reinicia el PC para terminarla' 'aviso' }
+    if ($reparar) { Write-Line 'Reparación profunda' 'reinicia el PC para terminarla' -tipo 'aviso' }
     Write-Title 'Listo'
 }
 

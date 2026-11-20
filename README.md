@@ -40,11 +40,11 @@ Todos siguen el mismo orden, de arriba abajo:
 1. **CHEQUEO INICIAL:** se detiene si PowerShell está restringido.
 2. **CONFIGURACIÓN:** lo que puedes cambiar sin tocar el resto. Por ejemplo, la lista `$Programas`, las horas mínimas de los temporales, los límites de los pings o tus ajustes TCP y DNS.
 3. **VISTA:** todo lo visual (títulos, colores y barras). Los demás métodos solo dicen el tipo de resultado (`ok`, `aviso`, `mal` o `info`), y la VISTA decide el color.
-4. **MÉTODOS REUTILIZABLES:** piezas que usan varias tareas, como `Remove-OldFiles`.
-5. **Tareas:** un método por tarea (`Clear-Temp`, `Test-Dns`...). Las de administrador están en la sección MANTENIMIENTO.
+4. **MÉTODOS REUTILIZABLES:** piezas que usan varias tareas, como `Remove-OldFile`.
+5. **Tareas:** un método por tarea (`Clear-Temp`, `Test-DnsResolution`...). Las de administrador están en la sección MANTENIMIENTO.
 6. **MAIN:** al final; llama a las tareas en orden.
 
-Los nombres de los métodos están en inglés, con los verbos oficiales de PowerShell (`Get-`, `Show-`, `Clear-`, `Test-`...), para que VS Code no los marque con avisos. Comentarios y mensajes siguen en español. Para agregar una limpieza, escribe un método nuevo de una línea con `Remove-OldFiles` y llámalo desde `Main`.
+Los nombres de los métodos están en inglés, con los verbos oficiales de PowerShell (`Get-`, `Show-`, `Clear-`, `Test-`...) y en singular, para que VS Code y PSScriptAnalyzer no los marquen con avisos. Comentarios y mensajes siguen en español. Para agregar una limpieza, escribe un método nuevo de una línea con `Remove-OldFile` y llámalo desde `Main`.
 
 Dos cosas que hay que mantener iguales a mano, porque cada carpeta funciona sola:
 
