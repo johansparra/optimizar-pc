@@ -23,6 +23,7 @@ En el `.RELEASENOTES` de cada `.ps1` solo está la nota de su versión actual. A
 
 ## Optimizar-PC
 
+- **1.2.0** (2026-11-20): la revisión del equipo muestra la salud de los discos (SMART) y, en laptops, de la batería. Como administrador, ofrece reparar Windows (DISM y sfc) con S/N. Arreglado: el Liberador de espacio (cleanmgr) dejaba el script colgado; ahora se espera con un tope de tiempo, continúa y muestra cuánto tardó y cuánto liberó.
 - **1.1.0** (2026-11-20): como administrador también activa TRIM en los discos SSD, antes de optimizar los discos. Sin administrador, la revisión dice cómo activarlo.
 - **1.0.2** (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, funciones en singular, el catch vacío ahora deja nota, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.
 - **1.0.1** (2026-11-19): enlace del proyecto actualizado al nuevo nombre del repositorio en GitHub (optimizar-pc).

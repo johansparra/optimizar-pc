@@ -1,15 +1,15 @@
 ﻿<#PSScriptInfo
-.VERSION 1.1.0
+.VERSION 1.2.0
 .GUID 81b2e606-23df-4e75-8725-5df78a0609fc
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.1.0 (2026-11-20): como administrador también activa TRIM en los discos SSD, antes de optimizar los discos. Sin administrador, la revisión dice cómo activarlo.
+1.2.0 (2026-11-20): la revisión del equipo ahora muestra la salud de los discos (SMART) y, en laptops, de la batería; como administrador ofrece reparar Windows (DISM y sfc) con S/N. El Liberador de espacio ya no deja el script colgado (se espera con un tope de tiempo) y muestra cuánto tardó y cuánto liberó.
 #>
 
 <#
 .SYNOPSIS
-Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo.
+Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo (espacio, salud de discos y batería).
 .DESCRIPTION
 Doble clic en Optimizar-PC.bat: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows.
 .NOTES
@@ -170,6 +170,20 @@ function Show-Disk {
     Write-Bar "Disco $Unidad" (100 * $disco.Used / $total) -detalle ('{0:N1} GB libres de {1:N1} GB' -f ($disco.Free / 1GB), ($total / 1GB))
 }
 
+# Salud de cada disco según su propio chip (SMART): si está sano, cuánto se ha desgastado el SSD y su
+# temperatura. Solo consulta (no pide admin). Avisa a tiempo si un disco empieza a fallar.
+function Show-DiskHealth {
+    Write-Line 'Salud de los discos' ''
+    Get-PhysicalDisk | Where-Object FriendlyName -notmatch 'Virtual' | ForEach-Object {
+        $rc = $_ | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue
+        $detalle = switch ($_.HealthStatus) { 'Healthy' { 'sano' } 'Warning' { 'atención: respáldalo' } default { "$($_.HealthStatus): respáldalo ya" } }
+        if ($null -ne $rc.Wear) { $detalle += ", desgaste $($rc.Wear) %" }
+        if ($rc.Temperature)    { $detalle += ", $($rc.Temperature) °C" }
+        $tipo = switch ($_.HealthStatus) { 'Healthy' { 'ok' } 'Warning' { 'aviso' } default { 'mal' } }
+        Write-Line "  $($_.FriendlyName)" $detalle -tipo $tipo
+    }
+}
+
 # TRIM: Windows le avisa al disco SSD qué espacio quedó libre, para que siga rápido. Windows 11 lo trae
 # activado; aquí solo se consulta (no pide admin). Como admin, Enable-Trim lo activa antes de esta revisión.
 function Show-Trim {
@@ -177,6 +191,20 @@ function Show-Trim {
     if (-not $estado)                                 { Write-Line 'TRIM (discos SSD)' 'no se pudo consultar' -tipo 'info' }
     elseif ($estado.Matches.Groups[1].Value -eq '0') { Write-Line 'TRIM (discos SSD)' 'activado' -tipo 'ok' }
     else { Write-Line 'TRIM (discos SSD)' 'desactivado: abre el .bat como administrador y se activa' -tipo 'aviso' }
+}
+
+# Salud de la batería (solo en laptops): cuánta carga aguanta hoy frente a la que traía nueva.
+# En un equipo de escritorio no hay batería y no muestra nada.
+function Show-Battery {
+    $full   = Get-CimInstance BatteryFullChargedCapacity -Namespace ROOT/WMI -ErrorAction SilentlyContinue
+    $design = Get-CimInstance BatteryStaticData -Namespace ROOT/WMI -ErrorAction SilentlyContinue
+    if (-not $full -or -not $design) { return }
+    $cargaHoy   = ($full   | Measure-Object FullChargedCapacity -Sum).Sum
+    $cargaNueva = ($design | Measure-Object DesignedCapacity -Sum).Sum
+    if (-not $cargaNueva) { return }
+    $salud = [int](100 * $cargaHoy / $cargaNueva)
+    $tipo = if ($salud -lt 60) { 'mal' } elseif ($salud -lt 80) { 'aviso' } else { 'ok' }
+    Write-Line 'Salud de la batería' "$salud % de la capacidad original" -tipo $tipo
 }
 
 function Show-DaysSinceRestart {
@@ -262,8 +290,20 @@ function Clear-ThumbnailCache {
 
 # Liberador de espacio de Windows con las opciones guardadas antes con "cleanmgr /sageset:1".
 # No pide admin: sin admin limpia solo lo que tu usuario puede borrar. Si nunca se configuró, no hace nada.
+# cleanmgr abre procesos aparte y su ventana se cierra antes de terminar; con Start-Process -Wait el
+# script se quedaba colgado. Se lanza y se espera a que no quede ningún cleanmgr, con un tope de 3 min
+# para no bloquear nunca: si tarda más, sigue solo en segundo plano y el script continúa.
 function Invoke-DiskCleanup {
-    Invoke-Tool 'Liberador de espacio' 'cleanmgr.exe' -argumentos '/sagerun:1'
+    Write-Line 'Liberador de espacio' 'ejecutando...' -tipo 'info'
+    $libreAntes = Get-FreeSpaceMB
+    $reloj = [Diagnostics.Stopwatch]::StartNew()
+    Start-Process cleanmgr.exe '/sagerun:1'
+    $limite = (Get-Date).AddMinutes(3)
+    do { Start-Sleep -Seconds 2 } while ((Get-Process -Name cleanmgr -ErrorAction SilentlyContinue) -and (Get-Date) -lt $limite)
+    # Segundos y MB liberados en el disco del sistema: la prueba de que hizo algo (pocos segundos y 0 MB = no había nada que limpiar).
+    $detalle = '{0:N0} s, {1:N0} MB liberados' -f $reloj.Elapsed.TotalSeconds, [math]::Max(0, (Get-FreeSpaceMB) - $libreAntes)
+    if (Get-Process -Name cleanmgr -ErrorAction SilentlyContinue) { Write-Line 'Liberador de espacio' "sigue en segundo plano tras $detalle (el script continúa)" -tipo 'info' }
+    else { Write-Line 'Liberador de espacio' "OK ($detalle)" -tipo 'ok' }
 }
 
 # ════════ MANTENIMIENTO (solo administrador: Main los salta si no lo eres) ════════
@@ -298,6 +338,16 @@ function Clear-RecentFile {
     Remove-OldFile 'Archivos recientes' "$env:APPDATA\Microsoft\Windows\Recent"
 }
 # ----------------------------------------------------------------------------------------------
+
+# Repara archivos de Windows dañados: DISM arregla el almacén de componentes (WinSxS) y luego sfc usa
+# ese almacén sano para reponer los archivos del sistema. Tarda varios minutos; por eso pregunta antes.
+function Repair-Windows {
+    if ((Read-Host '   ¿Reparar archivos de Windows? Tarda varios minutos (S/N)') -notmatch '^\s*s') {
+        Write-Line 'Reparar Windows' 'omitido (respondiste N)' -tipo 'info'; return
+    }
+    Invoke-Tool 'DISM reparar imagen' 'Dism.exe' -argumentos '/Online /Cleanup-Image /RestoreHealth'
+    Invoke-Tool 'Comprobar archivos (sfc)' 'sfc.exe' -argumentos '/scannow'
+}
 
 # DISM: borra versiones viejas de actualizaciones de Windows (carpeta WinSxS). Tarda varios minutos.
 function Clear-ComponentStore {
@@ -338,10 +388,12 @@ function Main {
     Clear-ThumbnailCache
     Invoke-DiskCleanup
 
-    # 3. Mantenimiento: después de borrar, para que DISM y la optimización trabajen sobre el disco ya limpio.
+    # 3. Mantenimiento: primero reparar Windows (DISM y sfc necesitan un almacén de componentes completo,
+    #    antes de que Clear-ComponentStore lo recorte), luego borrar, y al final optimizar el disco ya limpio.
     #    Optimize-Disk va último porque reorganiza el espacio que dejó libre todo lo anterior.
     if ($esAdmin) {
         Write-Title 'Mantenimiento'
+        Repair-Windows
         Clear-WindowsTemp
         Clear-ErrorReport
         Clear-WindowsHistory
@@ -358,7 +410,9 @@ function Main {
 
     Write-Title 'Revisión del equipo'
     Show-Disk
+    Show-DiskHealth
     Show-Trim
+    Show-Battery
     Show-DaysSinceRestart
     Show-PendingRestart
     Show-StartupProgram
