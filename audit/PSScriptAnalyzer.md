@@ -2,12 +2,13 @@
 
 ## Estado actual
 
-**0 avisos.** Los 4 scripts (versión 1.0.2) pasan todas las reglas normales de PSScriptAnalyzer 1.25.0 y la revisión de compatibilidad con PowerShell 5.1.
+**0 avisos.** Los 4 scripts (Limpiar-Memoria 1.0.2, Monitor-Memoria 1.0.2, Optimizar-Internet 1.1.0 y Optimizar-PC 1.1.0) pasan todas las reglas normales de PSScriptAnalyzer 1.25.0, en todos los niveles (error, aviso y sugerencia), y la revisión de compatibilidad con PowerShell 5.1.
 
 | Fecha | Versión de los scripts | Avisos | Lista completa |
 | --- | --- | ---: | --- |
 | 2026-11-19 23:22 | 1.0.1 | 138 | [PSScriptAnalyzer_2026-11-19_2322.md](PSScriptAnalyzer_2026-11-19_2322.md) |
 | 2026-11-19 23:39 | 1.0.2 | 0 | [PSScriptAnalyzer_2026-11-19_2339.md](PSScriptAnalyzer_2026-11-19_2339.md) |
+| 2026-11-20 23:18 | 1.0.2 y 1.1.0 (Optimizar-Internet y Optimizar-PC) | 0 | [PSScriptAnalyzer_2026-11-20_2318.md](PSScriptAnalyzer_2026-11-20_2318.md) |
 
 ## Cómo se resolvió cada aviso
 

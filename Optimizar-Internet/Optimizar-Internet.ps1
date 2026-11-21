@@ -1,10 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.0.2
+.VERSION 1.1.0
 .GUID 5a4e60f0-e762-43fe-b7e2-b4af84d52483
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.0.2 (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, funciones en singular, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.
+1.1.0 (2026-11-20): los servicios DHCP y Cliente DNS se revisan (y como admin se inician) antes de renovar la IP, que los necesita. Como admin, las cachés se vacían después de los ajustes y el DNS fijo, no antes.
 #>
 
 <#
@@ -168,6 +168,7 @@ function Show-Wifi {
 }
 
 # DHCP y Cliente DNS tienen que estar corriendo. Si no lo están y eres admin, se inician.
+# Main los revisa antes de renovar la IP (necesita DHCP) y de vaciar la caché DNS (necesita Cliente DNS).
 function Test-NetService($nombre, $servicio) {
     if ((Get-Service $servicio).Status -ne 'Running' -and (Test-Admin)) {
         Start-Service $servicio -ErrorAction SilentlyContinue
@@ -275,13 +276,16 @@ function Main {
     $reparar = $false
     if ($esAdmin -and -not $vpn) { $reparar = Confirm-DeepRepair }
 
-    # 3. Renovar la IP antes de tocar nada más, mientras la red está sana. Con VPN se salta para no cortarla.
+    # 3. Servicios primero (como admin se inician si están apagados): renovar la IP y vaciar la caché DNS
+    #    los necesitan. Luego renovar la IP antes de tocar nada más. Con VPN se salta para no cortarla.
     Write-Title 'Renovar conexión'
+    Test-NetService 'Servicio DHCP' 'Dhcp'
+    Test-NetService 'Servicio Cliente DNS' 'Dnscache'
     if ($vpn) { Write-Line 'Renovar IP' 'se salta para no cortar la VPN' -tipo 'info' }
     else      { foreach ($a in $fisicos) { Update-IP $a } }
 
-    # 4. Mantenimiento (solo admin), en el orden de tu .cmd: primero restablecer, luego vaciar cachés
-    #    y al final tus ajustes, para que queden puestos sobre la red ya restablecida.
+    # 4. Mantenimiento (solo admin): primero restablecer, luego tus ajustes (si fuera al revés, restablecer
+    #    los borraría) y al final vaciar cachés, para que no quede nada guardado de antes de los cambios.
     if ($esAdmin) {
         Write-Title 'Mantenimiento de red'
         if ($reparar) {
@@ -290,22 +294,20 @@ function Main {
             Reset-Winsock
             Reset-Proxy
         }
-        Clear-DnsCache
-        Clear-NetbiosCache
-        Clear-ArpCache
         Set-TcpSetting
         Disable-Teredo
         Set-StaticDnsServer
+        Clear-DnsCache
+        Clear-NetbiosCache
+        Clear-ArpCache
     }
 
-    # 5. Datos y diagnóstico con todo ya aplicado, de lo más cercano (servicios, router) a lo más lejano (internet, DNS).
+    # 5. Datos y diagnóstico con todo ya aplicado, de lo más cercano (router) a lo más lejano (internet, DNS).
     Write-Title 'Tu conexión'
     foreach ($a in $fisicos) { Show-Connection $a }
     Show-Wifi
 
     Write-Title 'Diagnóstico'
-    Test-NetService 'Servicio DHCP' 'Dhcp'
-    Test-NetService 'Servicio Cliente DNS' 'Dnscache'
     Test-Router $fisicos
     if ($vpn) { Write-Line 'Ping a internet' 'se salta con VPN' -tipo 'info' }
     else      { Test-Internet }

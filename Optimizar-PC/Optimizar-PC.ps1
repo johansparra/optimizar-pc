@@ -1,10 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.0.2
+.VERSION 1.1.0
 .GUID 81b2e606-23df-4e75-8725-5df78a0609fc
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.0.2 (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, funciones en singular, el catch vacío ahora deja nota, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.
+1.1.0 (2026-11-20): como administrador también activa TRIM en los discos SSD, antes de optimizar los discos. Sin administrador, la revisión dice cómo activarlo.
 #>
 
 <#
@@ -171,12 +171,12 @@ function Show-Disk {
 }
 
 # TRIM: Windows le avisa al disco SSD qué espacio quedó libre, para que siga rápido. Windows 11 lo trae
-# activado; aquí solo se consulta (no pide admin).
+# activado; aquí solo se consulta (no pide admin). Como admin, Enable-Trim lo activa antes de esta revisión.
 function Show-Trim {
     $estado = fsutil behavior query DisableDeleteNotify | Select-String 'DisableDeleteNotify\s*=\s*(\d)' | Select-Object -First 1
     if (-not $estado)                                 { Write-Line 'TRIM (discos SSD)' 'no se pudo consultar' -tipo 'info' }
     elseif ($estado.Matches.Groups[1].Value -eq '0') { Write-Line 'TRIM (discos SSD)' 'activado' -tipo 'ok' }
-    else { Write-Line 'TRIM (discos SSD)' 'desactivado: actívalo como admin con "fsutil behavior set DisableDeleteNotify 0"' -tipo 'aviso' }
+    else { Write-Line 'TRIM (discos SSD)' 'desactivado: abre el .bat como administrador y se activa' -tipo 'aviso' }
 }
 
 function Show-DaysSinceRestart {
@@ -304,6 +304,11 @@ function Clear-ComponentStore {
     Invoke-Tool 'DISM (WinSxS)' 'Dism.exe' -argumentos '/Online /Cleanup-Image /StartComponentCleanup'
 }
 
+# Activa TRIM en los SSD. Windows 11 ya lo trae activado: si ya lo estaba, no cambia nada.
+function Enable-Trim {
+    Invoke-Tool 'Activar TRIM' 'fsutil.exe' -argumentos 'behavior set DisableDeleteNotify 0'
+}
+
 # Desfragmenta los discos normales y hace TRIM en los SSD (todos los discos del equipo).
 function Optimize-Disk {
     Invoke-Tool 'Optimizar discos' 'defrag.exe' -argumentos '/C /O'
@@ -343,6 +348,7 @@ function Main {
         Clear-WindowsCookie
         Clear-RecentFile
         Clear-ComponentStore
+        Enable-Trim
         Optimize-Disk
     }
 
