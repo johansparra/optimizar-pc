@@ -2,13 +2,14 @@
 
 ## Estado actual
 
-**0 avisos.** Los 4 scripts (Limpiar-Memoria 1.0.2, Monitor-Memoria 1.0.2, Optimizar-Internet 1.1.0 y Optimizar-PC 1.2.0) pasan todas las reglas normales de PSScriptAnalyzer 1.25.0, en todos los niveles (error, aviso y sugerencia), y la revisión de compatibilidad con PowerShell 5.1.
+**0 avisos.** Los 4 scripts (Limpiar-Memoria 1.0.2, Monitor-Memoria 1.0.2, Optimizar-Internet 1.1.0 y Optimizar-PC 1.3.0) pasan todas las reglas normales de PSScriptAnalyzer 1.25.0, en todos los niveles (error, aviso y sugerencia), y la revisión de compatibilidad con PowerShell 5.1.
 
 | Fecha | Versión de los scripts | Avisos | Lista completa |
 | --- | --- | ---: | --- |
 | 2026-11-19 23:22 | 1.0.1 | 138 | [PSScriptAnalyzer_2026-11-19_2322.md](PSScriptAnalyzer_2026-11-19_2322.md) |
 | 2026-11-19 23:39 | 1.0.2 | 0 | [PSScriptAnalyzer_2026-11-19_2339.md](PSScriptAnalyzer_2026-11-19_2339.md) |
 | 2026-11-20 23:18 | 1.0.2 y 1.1.0 (Optimizar-Internet y Optimizar-PC) | 0 | [PSScriptAnalyzer_2026-11-20_2318.md](PSScriptAnalyzer_2026-11-20_2318.md) |
+| 2026-11-21 00:12 | 1.0.2, Optimizar-Internet 1.1.0 y Optimizar-PC 1.3.0 | 0 | [PSScriptAnalyzer_2026-11-21_0012.md](PSScriptAnalyzer_2026-11-21_0012.md) |
 
 ## Cómo se resolvió cada aviso
 
@@ -61,6 +62,8 @@ Todo en PowerShell 5.1 (el que usan los `.bat`), comparando la versión anterior
 | `Get-Help` de cada script | igual |
 
 **No se probó en el equipo real:** Optimizar-PC y Optimizar-Internet completos (borrarían tus archivos y reiniciarían la red), el ícono de Monitor-Memoria junto al reloj, ni el mantenimiento que pide administrador. En esas partes solo cambiaron nombres y la forma de pasar los argumentos, y eso lo cubre la comparación de llamadas.
+
+**Probado después en el equipo real:** Optimizar-PC 1.2.0 completo como administrador (2026-11-20): limpieza, Liberador de espacio, DISM, TRIM, optimizar discos y la revisión con la salud de los discos. **Falta probar:** Optimizar-Internet completo, el ícono de Monitor-Memoria junto al reloj, reparar Windows respondiendo **S**, la salud de la batería en una laptop y lo nuevo de Optimizar-PC 1.3.0 (marcar las opciones del Liberador y la Papelera sin pregunta).
 
 ## Compatibilidad con PowerShell 5.1
 

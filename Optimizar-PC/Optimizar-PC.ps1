@@ -1,10 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.2.0
+.VERSION 1.3.0
 .GUID 81b2e606-23df-4e75-8725-5df78a0609fc
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.2.0 (2026-11-20): la revisión del equipo ahora muestra la salud de los discos (SMART) y, en laptops, de la batería; como administrador ofrece reparar Windows (DISM y sfc) con S/N. El Liberador de espacio ya no deja el script colgado (se espera con un tope de tiempo) y muestra cuánto tardó y cuánto liberó.
+1.3.0 (2026-11-21): la Papelera se vacía siempre, sin preguntar. Como administrador, marca en el Liberador de espacio todas las opciones menos Descargas antes de ejecutarlo, y la pregunta de reparar Windows pasa al inicio para que el resto corra sin detenerse.
 #>
 
 <#
@@ -247,12 +247,8 @@ function Show-Summary($libreAntes) {
 function Clear-Trash {
     $elementos = (New-Object -ComObject Shell.Application).NameSpace(10).Items().Count
     if ($elementos -eq 0) { Write-Line 'Papelera' 'ya estaba vacía' -tipo 'info'; return }
-    if ((Read-Host "   La Papelera tiene $elementos elementos. ¿Vaciarla? (S/N)") -match '^\s*s') {
-        Clear-RecycleBin -Force -ErrorAction SilentlyContinue
-        Write-Line 'Papelera' "$elementos elementos vaciados" -tipo 'ok'
-    } else {
-        Write-Line 'Papelera' 'no se vació (respondiste N)' -tipo 'info'
-    }
+    Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+    Write-Line 'Papelera' "$elementos elementos vaciados" -tipo 'ok'
 }
 
 function Clear-Temp {
@@ -286,6 +282,24 @@ function Clear-TeamsCache {
 # Miniaturas e íconos del Explorador; Windows los vuelve a crear.
 function Clear-ThumbnailCache {
     Remove-OldFile 'Miniaturas del Explorador' "$Local\Microsoft\Windows\Explorer\*.db"
+}
+
+# Solo admin (las opciones se guardan en HKLM). Marca en el perfil 1 del Liberador todas las opciones menos
+# Descargas, que borraría tus archivos descargados. Marcarlas a mano en la ventana nunca las deja todas,
+# porque Windows solo muestra las que tienen algo que limpiar en ese momento.
+function Set-DiskCleanupOption {
+    $marcadas = 0
+    $fallidas = 0
+    foreach ($opcion in Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches') {
+        $valor = if ($opcion.PSChildName -eq 'DownloadsFolder') { 0 } else { 2 }   # 2 = marcada, 0 = no
+        try {
+            $null = New-ItemProperty -LiteralPath $opcion.PSPath -Name StateFlags0001 -Value $valor -PropertyType DWord -Force -ErrorAction Stop
+            if ($valor) { $marcadas++ }
+        } catch { $fallidas++ }
+    }
+    $texto = "$marcadas marcadas (todas menos Descargas)"
+    if ($fallidas) { $texto += " · $fallidas sin permiso" }
+    Write-Line 'Opciones del Liberador' $texto -tipo $(if ($fallidas) { 'aviso' } else { 'ok' })
 }
 
 # Liberador de espacio de Windows con las opciones guardadas antes con "cleanmgr /sageset:1".
@@ -340,11 +354,12 @@ function Clear-RecentFile {
 # ----------------------------------------------------------------------------------------------
 
 # Repara archivos de Windows dañados: DISM arregla el almacén de componentes (WinSxS) y luego sfc usa
-# ese almacén sano para reponer los archivos del sistema. Tarda varios minutos; por eso pregunta antes.
+# ese almacén sano para reponer los archivos del sistema. Tarda varios minutos; por eso Main pregunta al inicio.
+function Confirm-WindowsRepair {
+    (Read-Host '   ¿Reparar también archivos de Windows (DISM y sfc)? Tarda varios minutos (S/N)') -match '^\s*s'
+}
+
 function Repair-Windows {
-    if ((Read-Host '   ¿Reparar archivos de Windows? Tarda varios minutos (S/N)') -notmatch '^\s*s') {
-        Write-Line 'Reparar Windows' 'omitido (respondiste N)' -tipo 'info'; return
-    }
     Invoke-Tool 'DISM reparar imagen' 'Dism.exe' -argumentos '/Online /Cleanup-Image /RestoreHealth'
     Invoke-Tool 'Comprobar archivos (sfc)' 'sfc.exe' -argumentos '/scannow'
 }
@@ -373,9 +388,12 @@ function Main {
     $esAdmin = Test-Admin
     if ($esAdmin) { Write-Line 'Modo' 'administrador: limpieza + mantenimiento' -tipo 'ok' }
     else          { Write-Line 'Modo' 'normal: solo limpieza (el mantenimiento pide admin)' -tipo 'info' }
+    # La única pregunta va al principio (solo admin); el resto corre sin interrupciones.
+    $reparar = $esAdmin -and (Confirm-WindowsRepair)
     $libreAntes = Get-FreeSpaceMB
 
-    # 2. Limpieza. La Papelera va primero porque es lo único que pregunta; el resto corre sin interrupciones.
+    # 2. Limpieza. Como admin, antes del Liberador se marcan todas sus opciones (menos Descargas),
+    #    para que al ejecutarlo limpie todo.
     Write-Title 'Limpieza'
     Clear-Trash
     Clear-Temp
@@ -386,6 +404,7 @@ function Main {
     Clear-FirefoxCache
     Clear-TeamsCache
     Clear-ThumbnailCache
+    if ($esAdmin) { Set-DiskCleanupOption }
     Invoke-DiskCleanup
 
     # 3. Mantenimiento: primero reparar Windows (DISM y sfc necesitan un almacén de componentes completo,
@@ -393,7 +412,8 @@ function Main {
     #    Optimize-Disk va último porque reorganiza el espacio que dejó libre todo lo anterior.
     if ($esAdmin) {
         Write-Title 'Mantenimiento'
-        Repair-Windows
+        if ($reparar) { Repair-Windows }
+        else          { Write-Line 'Reparar Windows' 'omitido (respondiste N)' -tipo 'info' }
         Clear-WindowsTemp
         Clear-ErrorReport
         Clear-WindowsHistory

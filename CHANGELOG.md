@@ -23,6 +23,7 @@ En el `.RELEASENOTES` de cada `.ps1` solo está la nota de su versión actual. A
 
 ## Optimizar-PC
 
+- **1.3.0** (2026-11-21): la Papelera se vacía siempre, sin preguntar. Como administrador, marca en el Liberador de espacio todas las opciones menos Descargas antes de ejecutarlo, y la pregunta de reparar Windows pasa al inicio para que el resto corra sin detenerse.
 - **1.2.0** (2026-11-20): la revisión del equipo muestra la salud de los discos (SMART) y, en laptops, de la batería. Como administrador, ofrece reparar Windows (DISM y sfc) con S/N. Arreglado: el Liberador de espacio (cleanmgr) dejaba el script colgado; ahora se espera con un tope de tiempo, continúa y muestra cuánto tardó y cuánto liberó.
 - **1.1.0** (2026-11-20): como administrador también activa TRIM en los discos SSD, antes de optimizar los discos. Sin administrador, la revisión dice cómo activarlo.
 - **1.0.2** (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, funciones en singular, el catch vacío ahora deja nota, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.
