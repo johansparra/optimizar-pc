@@ -1,10 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.1.0
+.VERSION 1.1.1
 .GUID 5a4e60f0-e762-43fe-b7e2-b4af84d52483
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.1.0 (2026-11-20): los servicios DHCP y Cliente DNS se revisan (y como admin se inician) antes de renovar la IP, que los necesita. Como admin, las cachés se vacían después de los ajustes y el DNS fijo, no antes.
+1.1.1 (2026-11-22): renovar la IP ya no se queda colgado cuando el router no da IP (pasa al prender el PC): espera máximo 30 segundos, avisa en rojo y sigue con el diagnóstico.
 #>
 
 <#
@@ -36,6 +36,7 @@ $MsRouter         = 15                    # respuesta del router (ms): más que 
 $MsRouterMalo     = 50                    #                         más que esto, rojo
 $MsInternet       = 60                    # respuesta de internet (ms): más que esto, amarillo
 $MsInternetMalo   = 150                   #                            más que esto, rojo
+$SegundosRenovarIP = 30                   # máximo que se espera a que el router dé la IP
 # Adaptadores virtuales que NO son VPN (máquinas virtuales y similares)
 $NoEsVpn = 'Hyper-V|vEthernet|VMware|VirtualBox|Loopback|Bluetooth|WSL|Docker|Npcap|Wi-Fi Direct'
 
@@ -128,10 +129,20 @@ function Invoke-CmdLine($nombre, $comandos) {
 
 # ════════ CONEXIÓN Y DIAGNÓSTICO (sin admin; un método = una tarea) ════════
 
+# Si el router no da IP (pasa al prender el PC), ipconfig se queda esperando minutos: por eso hay límite.
+# Al agotarse, ipconfig sigue intentando por su cuenta y el script continúa. Su texto va a nul, sin ventana oculta.
 function Update-IP($adaptador) {
-    $null = ipconfig /renew "$($adaptador.Name)" 2>&1   # nunca /release: ese corta la conexión
-    if ($LASTEXITCODE -eq 0) { Write-Line "Renovar IP: $($adaptador.Name)" 'OK' -tipo 'ok' }
-    else                     { Write-Line "Renovar IP: $($adaptador.Name)" 'no se renovó (puede tener IP fija)' -tipo 'aviso' }
+    $nombre = "Renovar IP: $($adaptador.Name)"
+    $inicio = New-Object Diagnostics.ProcessStartInfo -Property @{
+        FileName = 'cmd'; UseShellExecute = $false
+        Arguments = "/c ipconfig /renew `"$($adaptador.Name)`" >nul 2>&1"   # nunca /release: ese corta la conexión
+    }
+    $ipconfig = [Diagnostics.Process]::Start($inicio)
+    if (-not $ipconfig.WaitForExit($SegundosRenovarIP * 1000)) {
+        Write-Line $nombre "el router no dio IP en $SegundosRenovarIP s: revisa el cable o reinicia el router" -tipo 'mal'
+    }
+    elseif ($ipconfig.ExitCode -eq 0) { Write-Line $nombre 'OK' -tipo 'ok' }
+    else                              { Write-Line $nombre 'no se renovó (puede tener IP fija)' -tipo 'aviso' }
 }
 
 function Show-Connection($adaptador) {

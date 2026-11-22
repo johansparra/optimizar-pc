@@ -16,6 +16,7 @@ En el `.RELEASENOTES` de cada `.ps1` solo está la nota de su versión actual. A
 
 ## Optimizar-Internet
 
+- **1.1.1** (2026-11-22): renovar la IP ya no se queda colgado cuando el router no da IP (pasa al prender el PC): espera máximo 30 segundos, avisa en rojo y sigue con el diagnóstico.
 - **1.1.0** (2026-11-20): los servicios DHCP y Cliente DNS se revisan (y como admin se inician) antes de renovar la IP, que los necesita. Como admin, las cachés se vacían después de los ajustes y el DNS fijo, no antes.
 - **1.0.2** (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, funciones en singular, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.
 - **1.0.1** (2026-11-19): enlace del proyecto actualizado al nuevo nombre del repositorio en GitHub (optimizar-pc).
