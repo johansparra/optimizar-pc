@@ -1,10 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.1.0
+.VERSION 1.1.1
 .GUID 4b276250-ee71-40e3-9732-65f50b5d5cb3
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.1.0 (2026-11-22): deja un log en la carpeta log\ solo con lo importante: el inicio, cada limpieza (manual o automática) con lo que liberó, cuando se activa o desactiva la limpieza automática, los errores y el fin. Nunca anota cada lectura de la RAM.
+1.1.1 (2026-11-22): en el log, la columna de la función ya no muestra comandos de Windows a mitad de camino (por ejemplo Get-PhysicalDisk<Process>), solo las funciones del script. El script hace lo mismo.
 #>
 
 <#
@@ -112,7 +112,7 @@ function Remove-OldLog($carpeta) {
 }
 
 # Anota una línea si su nivel llega a $NivelLog. La columna del medio es la cadena de funciones que
-# llevó hasta aquí (sin Main ni las de VISTA y LOG), para saber dónde pasó.
+# llevó hasta aquí (sin Main, las de VISTA y LOG ni bloques como <ScriptBlock> o Get-PhysicalDisk<Process>), para saber dónde pasó.
 function Write-LogLine($nivel, $texto) {
     if (-not $script:ArchivoLog -or $Niveles[$nivel] -lt $Niveles[$NivelLog]) { return }
     if ($nivel -eq 'DEBUG' -and $script:ArchivoLog.BaseStream.Length -ge $LogMaxMB * 1MB) {
@@ -120,7 +120,7 @@ function Write-LogLine($nivel, $texto) {
         return
     }
     $cadena = @(Get-PSCallStack | Select-Object -Skip 1 -ExpandProperty FunctionName |
-        Where-Object { $_ -notmatch '^(Write-|Main$|<ScriptBlock>)' })
+        Where-Object { $_ -notmatch '^(Write-|Main$)|<' })
     [array]::Reverse($cadena)
     $donde = if ($cadena) { $cadena -join '>' } else { 'Main' }
     $linea = '{0:yyyy-MM-dd HH:mm:ss.fff} [{1,-5}] {2} | {3}' -f (Get-Date), $nivel, $donde, ($texto -replace '\r?\n', ' ')
