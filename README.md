@@ -38,23 +38,29 @@ Todos siguen el mismo orden, de arriba abajo:
 
 0. **Bloques de información** (solo comentarios): versión, autor y nota de la versión actual (`<#PSScriptInfo`), y la ayuda que muestra `Get-Help .\Optimizar-PC\Optimizar-PC.ps1`. El historial de versiones de los 4 scripts está en [CHANGELOG.md](CHANGELOG.md). Al cambiar un script se sube su versión y se anota qué cambió; la skill `actualizar-version-scripts` (en `.claude/skills`) lo hace con Claude Code.
 1. **CHEQUEO INICIAL:** se detiene si PowerShell está restringido.
-2. **CONFIGURACIÓN:** lo que puedes cambiar sin tocar el resto. Por ejemplo, la lista `$Programas`, las horas mínimas de los temporales, los límites de los pings o tus ajustes TCP y DNS.
-3. **VISTA:** todo lo visual (títulos, colores y barras). Los demás métodos solo dicen el tipo de resultado (`ok`, `aviso`, `mal` o `info`), y la VISTA decide el color.
-4. **MÉTODOS REUTILIZABLES:** piezas que usan varias tareas, como `Remove-OldFile`.
-5. **Tareas:** un método por tarea (`Clear-Temp`, `Test-DnsResolution`...). Las de administrador están en la sección MANTENIMIENTO.
-6. **MAIN:** al final; llama a las tareas en orden.
+2. **CONFIGURACIÓN:** lo que puedes cambiar sin tocar el resto. Por ejemplo, la lista `$Programas`, las horas mínimas de los temporales, los límites de los pings, tus ajustes TCP y DNS o el nivel del log (`$NivelLog`).
+3. **LOG:** escribe el log de cada ejecución (`Start-Log`, `Write-LogLine`, `Stop-Log`). Lo que sale en pantalla llega solo al log a través de la VISTA.
+4. **VISTA:** todo lo visual (títulos, colores y barras). Los demás métodos solo dicen el tipo de resultado (`ok`, `aviso`, `mal` o `info`), y la VISTA decide el color.
+5. **MÉTODOS REUTILIZABLES:** piezas que usan varias tareas, como `Remove-OldFile`.
+6. **Tareas:** un método por tarea (`Clear-Temp`, `Test-DnsResolution`...). Las de administrador están en la sección MANTENIMIENTO.
+7. **MAIN:** al final; llama a las tareas en orden.
 
 Los nombres de los métodos están en inglés, con los verbos oficiales de PowerShell (`Get-`, `Show-`, `Clear-`, `Test-`...) y en singular, para que VS Code y PSScriptAnalyzer no los marquen con avisos. Comentarios y mensajes siguen en español. Para agregar una limpieza, escribe un método nuevo de una línea con `Remove-OldFile` y llámalo desde `Main`.
 
-Dos cosas que hay que mantener iguales a mano, porque cada carpeta funciona sola:
+Tres cosas que hay que mantener iguales a mano, porque cada carpeta funciona sola:
 
 - Los métodos de **VISTA** son idénticos en los 4 archivos: si cambias uno, cópialo igual en los demás.
+- La sección **LOG** también es idéntica en los 4: lo único que cambia entre scripts está en CONFIGURACIÓN (`$NivelLog` y `$PrefijoLog`).
 - La lista **`$Programas`** está en `Limpiar-Memoria` y en `Monitor-Memoria`: si agregas o quitas un programa, hazlo en las dos.
 
 ## Notas
 
 - **Descarga desde GitHub:** antes de extraer el ZIP, clic derecho > Propiedades > Desbloquear. Si no, Windows no deja ejecutar los `.ps1`.
 - **Copiar al PC de la empresa:** basta con copiar la carpeta de la herramienta que necesites. La carpeta `.claude` es solo para Claude Code y no hace falta.
+- **Logs:** cada herramienta deja un `.log` por ejecución en la carpeta `log` junto a su `.ps1` (por ejemplo `Optimizar-PC\log\op-pc-2026-11-22_21-05-33.log`). Cada línea dice la hora, el nivel, la función donde pasó y el mensaje. Se guardan los de hoy y ayer, máximo 3 por día y 10 MB por archivo, así que ocupan pocos KB. Si algo falla en el PC de la empresa, copia ese archivo y revísalo aquí.
+  - Para ver todo el detalle, cambia `$NivelLog` a `'DEBUG'` en la CONFIGURACIÓN del `.ps1`. Úsalo solo mientras revisas una falla: en DEBUG salen nombres de archivos, comandos y, al final, cada error de PowerShell con la función y la línea donde pasó. El log pesa más. Luego vuelve a `'INFO'`.
+  - El monitor solo anota el inicio, cada limpieza, la limpieza automática al activarla o desactivarla, los errores y el fin. Nunca anota cada lectura.
+  - Si no se puede crear la carpeta `log`, la herramienta lo avisa en amarillo y funciona igual.
 - **Monitor sin ícono visible:** está en la flecha `^` junto al reloj. Arrástralo a la barra de tareas una vez.
 - **Liberador de espacio:** como administrador, el script marca todas sus opciones menos **Descargas** (para no borrar tus archivos descargados) y lo ejecuta. Sin administrador usa las opciones ya guardadas con `cleanmgr /sageset:1`; si nunca se configuraron, no hace nada. Entre las opciones marcadas están "Instalaciones anteriores de Windows" (después no puedes volver a la versión anterior), "Archivos de instalación ESD" ("Restablecer este PC" tendría que descargar Windows) y los drivers viejos.
 - **Ajustes de red como administrador** (solo PC personal):

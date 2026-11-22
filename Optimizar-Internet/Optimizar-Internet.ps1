@@ -1,19 +1,19 @@
 ﻿<#PSScriptInfo
-.VERSION 1.1.1
+.VERSION 1.2.0
 .GUID 5a4e60f0-e762-43fe-b7e2-b4af84d52483
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.1.1 (2026-11-22): renovar la IP ya no se queda colgado cuando el router no da IP (pasa al prender el PC): espera máximo 30 segundos, avisa en rojo y sigue con el diagnóstico.
+1.2.0 (2026-11-22): deja un log de cada ejecución en la carpeta log\, con la función donde pasó cada cosa. El nivel se elige en $NivelLog (INFO por defecto; DEBUG anota los adaptadores, cada comando de red con su respuesta y lo que devolvió el DNS). Guarda los de hoy y ayer, máximo 3 por día y 10 MB por archivo.
 #>
 
 <#
 .SYNOPSIS
 Renueva la IP (si no hay VPN), revisa la conexión paso a paso y, como admin, hace el mantenimiento de red.
 .DESCRIPTION
-Doble clic en Optimizar-Internet.bat: renovar IP y diagnóstico. Clic derecho > Ejecutar como administrador: también mantenimiento y tus ajustes de red.
+Doble clic en Optimizar-Internet.bat: renovar IP y diagnóstico. Clic derecho > Ejecutar como administrador: también mantenimiento y tus ajustes de red. Cada ejecución deja un log en la carpeta log\.
 .NOTES
-Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > CONEXIÓN Y DIAGNÓSTICO > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > LOG > VISTA > MÉTODOS REUTILIZABLES > CONEXIÓN Y DIAGNÓSTICO > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
 Versión y nota de la versión actual: bloque PSScriptInfo de arriba. Historial de versiones: CHANGELOG.md en la raíz del repositorio. Los dos se mantienen con la skill actualizar-version-scripts.
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Los colores en la consola son la interfaz: el script se abre con doble clic.')]
@@ -37,6 +37,8 @@ $MsRouterMalo     = 50                    #                         más que est
 $MsInternet       = 60                    # respuesta de internet (ms): más que esto, amarillo
 $MsInternetMalo   = 150                   #                            más que esto, rojo
 $SegundosRenovarIP = 30                   # máximo que se espera a que el router dé la IP
+$NivelLog         = 'INFO'                # log en la carpeta log\: DEBUG, INFO, WARN o ERROR (DEBUG anota cada comando y su respuesta: solo para revisar una falla)
+$PrefijoLog       = 'op-net'              # nombre de los archivos de log
 # Adaptadores virtuales que NO son VPN (máquinas virtuales y similares)
 $NoEsVpn = 'Hyper-V|vEthernet|VMware|VirtualBox|Loopback|Bluetooth|WSL|Docker|Npcap|Wi-Fi Direct'
 
@@ -55,6 +57,92 @@ $AjustesTcp = @(
     'netsh int tcp set global initialrto=2000'
     'netsh int tcp set global maxsynretransmissions=2'
 )
+
+# ════════ LOG (idéntico en los 4 scripts: si lo cambias, cópialo igual en los demás) ════════
+
+# Un archivo por ejecución en la carpeta log\ junto al .ps1. Se guardan los de hoy y ayer, máximo
+# $LogPorDia por día. Si no se puede crear, el script sigue igual, solo que sin log.
+$LogPorDia  = 3    # archivos que se guardan por día
+$LogMaxMB   = 10   # al llegar a este tamaño se dejan de anotar las líneas DEBUG (las demás siguen)
+$Niveles    = @{ DEBUG = 0; INFO = 1; WARN = 2; ERROR = 3 }
+$script:ArchivoLog = $null   # no se llama $Log: en PowerShell $log y $Log son la misma variable
+
+# Abre el log de esta ejecución, anota el encabezado y borra los logs viejos.
+function Start-Log {
+    $script:LogInicio = Get-Date
+    $script:LogLleno  = $false
+    if ($Niveles.Keys -notcontains $NivelLog) {
+        Write-Line 'Log' "el nivel '$NivelLog' no existe; se usa INFO" -tipo 'aviso'
+        $script:NivelLog = 'INFO'
+    }
+    $carpeta = Join-Path $PSScriptRoot 'log'
+    try {
+        $null = New-Item $carpeta -ItemType Directory -Force -ErrorAction Stop
+        $ruta = Join-Path $carpeta ('{0}-{1:yyyy-MM-dd_HH-mm-ss}.log' -f $PrefijoLog, $script:LogInicio)
+        $script:ArchivoLog = New-Object IO.StreamWriter($ruta, $true, (New-Object Text.UTF8Encoding($true)))
+        $script:ArchivoLog.AutoFlush = $true   # cada línea queda en el disco aunque se cierre la ventana a mitad
+    } catch {
+        $script:ArchivoLog = $null
+        Write-Line 'Log' "no se pudo crear, se sigue sin log: $($_.Exception.Message)" -tipo 'aviso'
+        return
+    }
+    $os      = Get-CimInstance Win32_OperatingSystem
+    $version = Select-String -LiteralPath $PSCommandPath -Pattern '^\.VERSION (.+)' | Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value }
+    $admin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $esAdmin = if ($admin) { 'sí' } else { 'no' }
+    Write-LogLine INFO ('{0} {1} | admin: {2} | nivel: {3} | {4} {5} | PowerShell {6}' -f (Split-Path $PSCommandPath -Leaf), $version, $esAdmin, $NivelLog, $os.Caption, $os.Version, $PSVersionTable.PSVersion)
+    Remove-OldLog $carpeta
+}
+
+# Deja los logs de hoy y ayer, los $LogPorDia más nuevos de cada día. Solo toca archivos con el nombre exacto de un log.
+function Remove-OldLog($carpeta) {
+    $ayer   = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
+    $patron = '^{0}-(\d{{4}}-\d\d-\d\d)_\d\d-\d\d-\d\d\.log$' -f [regex]::Escape($PrefijoLog)
+    $porDia = Get-ChildItem -LiteralPath $carpeta -File | Where-Object Name -Match $patron | Group-Object { $_.Name -replace $patron, '$1' }
+    foreach ($dia in $porDia) {
+        $sobran = if ($dia.Name -lt $ayer) { $dia.Group } else { $dia.Group | Sort-Object Name -Descending | Select-Object -Skip $LogPorDia }
+        foreach ($archivo in $sobran) {
+            try   { Remove-Item -LiteralPath $archivo.FullName -ErrorAction Stop; Write-LogLine DEBUG "Log viejo borrado: $($archivo.Name)" }
+            catch { Write-LogLine DEBUG "Log viejo que no se pudo borrar: $($archivo.Name): $($_.Exception.Message)" }
+        }
+    }
+}
+
+# Anota una línea si su nivel llega a $NivelLog. La columna del medio es la cadena de funciones que
+# llevó hasta aquí (sin Main ni las de VISTA y LOG), para saber dónde pasó.
+function Write-LogLine($nivel, $texto) {
+    if (-not $script:ArchivoLog -or $Niveles[$nivel] -lt $Niveles[$NivelLog]) { return }
+    if ($nivel -eq 'DEBUG' -and $script:ArchivoLog.BaseStream.Length -ge $LogMaxMB * 1MB) {
+        if (-not $script:LogLleno) { $script:LogLleno = $true; Write-LogLine WARN "El log llegó a $LogMaxMB MB: ya no se anotan las líneas DEBUG" }
+        return
+    }
+    $cadena = @(Get-PSCallStack | Select-Object -Skip 1 -ExpandProperty FunctionName |
+        Where-Object { $_ -notmatch '^(Write-|Main$|<ScriptBlock>)' })
+    [array]::Reverse($cadena)
+    $donde = if ($cadena) { $cadena -join '>' } else { 'Main' }
+    $linea = '{0:yyyy-MM-dd HH:mm:ss.fff} [{1,-5}] {2} | {3}' -f (Get-Date), $nivel, $donde, ($texto -replace '\r?\n', ' ')
+    # Si escribir falla (por ejemplo, el disco se llenó), se deja de escribir el log y el script sigue.
+    try   { $script:ArchivoLog.WriteLine($linea) }
+    catch { $script:ArchivoLog = $null; Write-Line 'Log' "se dejó de escribir: $($_.Exception.Message)" -tipo 'aviso' }
+}
+
+# Nivel del log para cada tipo de la VISTA: aviso (amarillo) = WARN, mal (rojo) = ERROR, el resto INFO.
+function Get-LogLevel($tipo) {
+    switch ($tipo) { 'aviso' { 'WARN' } 'mal' { 'ERROR' } default { 'INFO' } }
+}
+
+# Al final: anota en DEBUG los errores de PowerShell que hubo (con su función y línea), cuánto duró, y cierra
+# el archivo. Main no va dentro de try: así un error sale en rojo y el script sigue, igual que sin log.
+# En DEBUG salen también los errores que el script ignora a propósito (temporales sin permiso, programas cerrados).
+function Stop-Log {
+    if (-not $script:ArchivoLog) { return }
+    $errores = @($Error)   # el más nuevo primero; PowerShell guarda máximo 256
+    [array]::Reverse($errores)
+    foreach ($e in $errores) { Write-LogLine DEBUG ('Error de PowerShell: {0} | {1}' -f $e.Exception.Message, ($e.ScriptStackTrace -replace '\r?\n', ' <- ')) }
+    Write-LogLine INFO ('Fin ({0:N0} s)' -f ((Get-Date) - $script:LogInicio).TotalSeconds)
+    try { $script:ArchivoLog.Dispose() } catch { Write-Verbose "No se pudo cerrar el log: $_" }
+    $script:ArchivoLog = $null
+}
 
 # ════════ VISTA (todo lo visual está aquí: colores y títulos) ════════
 
@@ -76,12 +164,15 @@ function Write-Title($texto) {
     Write-Host ''
     Write-Host "   $texto" -ForegroundColor Cyan
     Write-Host ('   ' + '─' * 58) -ForegroundColor DarkGray
+    Write-LogLine INFO "=== $texto ==="
 }
 
 # Una línea del reporte: qué se hizo a la izquierda, resultado a la derecha con el color de su tipo.
+# También va al log, con el nivel que corresponde a su tipo.
 function Write-Line($nombre, $resultado, $tipo = 'normal') {
     Write-Host ('   {0,-32} ' -f $nombre) -NoNewline   # el espacio final separa aunque el nombre sea largo
     Write-Host $resultado -ForegroundColor $Colores[$tipo]
+    Write-LogLine (Get-LogLevel $tipo) ((@("$nombre".Trim(), "$resultado") -ne '') -join ': ')
 }
 
 # ════════ MÉTODOS REUTILIZABLES ════════
@@ -98,9 +189,10 @@ function Get-PhysicalAdapter {
 
 # VPN o Zscaler: cualquier otro adaptador conectado que no esté en $NoEsVpn.
 function Get-Vpn($fisicos) {
-    @(Get-NetAdapter | Where-Object {
-        $_.Status -eq 'Up' -and $_.ifIndex -notin $fisicos.ifIndex -and
-        "$($_.Name) $($_.InterfaceDescription)" -notmatch $NoEsVpn
+    $conectados = @(Get-NetAdapter | Where-Object Status -eq 'Up')
+    Write-LogLine DEBUG ('Adaptadores conectados: ' + (($conectados | ForEach-Object { '{0} ({1})' -f $_.Name, $_.InterfaceDescription }) -join '; '))
+    @($conectados | Where-Object {
+        $_.ifIndex -notin $fisicos.ifIndex -and "$($_.Name) $($_.InterfaceDescription)" -notmatch $NoEsVpn
     })
 }
 
@@ -120,7 +212,8 @@ function Test-Ping($nombre, $destino, $msAviso, $msMal) {
 function Invoke-CmdLine($nombre, $comandos) {
     $fallidos = @()
     foreach ($comando in $comandos) {
-        $null = cmd /c "$comando 2>&1"
+        $salida = cmd /c "$comando 2>&1"
+        Write-LogLine DEBUG ('{0} -> código {1}: {2}' -f $comando, $LASTEXITCODE, (($salida | Where-Object { $_ -match '\S' }) -join ' / '))
         if ($LASTEXITCODE -ne 0) { $fallidos += $comando }
     }
     if (-not $fallidos) { Write-Line $nombre 'OK' -tipo 'ok' }
@@ -137,6 +230,7 @@ function Update-IP($adaptador) {
         FileName = 'cmd'; UseShellExecute = $false
         Arguments = "/c ipconfig /renew `"$($adaptador.Name)`" >nul 2>&1"   # nunca /release: ese corta la conexión
     }
+    Write-LogLine DEBUG "Comando: $($inicio.Arguments) (espera máximo $SegundosRenovarIP s)"
     $ipconfig = [Diagnostics.Process]::Start($inicio)
     if (-not $ipconfig.WaitForExit($SegundosRenovarIP * 1000)) {
         Write-Line $nombre "el router no dio IP en $SegundosRenovarIP s: revisa el cable o reinicia el router" -tipo 'mal'
@@ -182,6 +276,7 @@ function Show-Wifi {
 # Main los revisa antes de renovar la IP (necesita DHCP) y de vaciar la caché DNS (necesita Cliente DNS).
 function Test-NetService($nombre, $servicio) {
     if ((Get-Service $servicio).Status -ne 'Running' -and (Test-Admin)) {
+        Write-LogLine DEBUG "Se intenta iniciar el servicio $servicio"
         Start-Service $servicio -ErrorAction SilentlyContinue
     }
     $estado = (Get-Service $servicio).Status
@@ -209,6 +304,7 @@ function Show-InternetAccess {
 function Test-DnsResolution {
     $reloj = [Diagnostics.Stopwatch]::StartNew()
     $respuesta = Resolve-DnsName $PaginaPruebaDns -Type A -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue
+    Write-LogLine DEBUG ('{0} -> {1}' -f $PaginaPruebaDns, (@($respuesta.IPAddress) -join ', '))
     if ($respuesta) { Write-Line 'DNS' ('responde ({0:N0} ms)' -f $reloj.Elapsed.TotalMilliseconds) -tipo 'ok' }
     else            { Write-Line 'DNS' 'no responde' -tipo 'mal' }
 }
@@ -248,7 +344,9 @@ function Set-StaticDnsServer {
 # --- Reparación profunda: solo admin, solo si dices que sí, y hay que reiniciar después --------
 
 function Confirm-DeepRepair {
-    (Read-Host '   ¿Hacer también la reparación profunda? Restablece firewall, IP y Winsock y luego hay que reiniciar (S/N)') -match '^\s*s'
+    $respuesta = Read-Host '   ¿Hacer también la reparación profunda? Restablece firewall, IP y Winsock y luego hay que reiniciar (S/N)'
+    Write-LogLine INFO "Reparación profunda: respondió '$respuesta'"
+    $respuesta -match '^\s*s'
 }
 
 # Ojo: borra las reglas que tus programas agregaron al firewall de Windows (las vuelven a pedir).
@@ -273,6 +371,7 @@ function Reset-Proxy {
 
 function Main {
     Write-Header 'OPTIMIZAR INTERNET'
+    Start-Log
 
     # 1. Primero: permisos, conexión y VPN. Eso decide qué se puede hacer.
     $esAdmin = Test-Admin
@@ -329,4 +428,6 @@ function Main {
     Write-Title 'Listo'
 }
 
+# Sin try a propósito: si algo falla sale en rojo y el resto sigue, igual que antes. Stop-Log cierra el log.
 Main
+Stop-Log

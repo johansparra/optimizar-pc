@@ -1,3 +1,6 @@
 # RAMMap es de Microsoft Sysinternals: su licencia no permite redistribuirlo
 RAMMap/
 RAMMap.zip
+
+# Logs que deja cada herramienta al ejecutarse (carpeta log\ junto a cada .ps1)
+log/

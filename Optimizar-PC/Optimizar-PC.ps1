@@ -1,19 +1,19 @@
 ﻿<#PSScriptInfo
-.VERSION 1.3.0
+.VERSION 1.4.0
 .GUID 81b2e606-23df-4e75-8725-5df78a0609fc
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.3.0 (2026-11-21): la Papelera se vacía siempre, sin preguntar. Como administrador, marca en el Liberador de espacio todas las opciones menos Descargas antes de ejecutarlo, y la pregunta de reparar Windows pasa al inicio para que el resto corra sin detenerse.
+1.4.0 (2026-11-22): deja un log de cada ejecución en la carpeta log\, con la función donde pasó cada cosa. El nivel se elige en $NivelLog (INFO por defecto; DEBUG anota cada archivo borrado y el motivo de los que estaban en uso). Guarda los de hoy y ayer, máximo 3 por día y 10 MB por archivo.
 #>
 
 <#
 .SYNOPSIS
 Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo (espacio, salud de discos y batería).
 .DESCRIPTION
-Doble clic en Optimizar-PC.bat: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows.
+Doble clic en Optimizar-PC.bat: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows. Cada ejecución deja un log en la carpeta log\.
 .NOTES
-Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > VISTA > MÉTODOS REUTILIZABLES > REVISIÓN > LIMPIEZA > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
+Orden del archivo: CHEQUEO INICIAL > CONFIGURACIÓN > LOG > VISTA > MÉTODOS REUTILIZABLES > REVISIÓN > LIMPIEZA > MANTENIMIENTO (solo admin) > MAIN (al final, como en Java).
 Versión y nota de la versión actual: bloque PSScriptInfo de arriba. Historial de versiones: CHANGELOG.md en la raíz del repositorio. Los dos se mantienen con la skill actualizar-version-scripts.
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Los colores en la consola son la interfaz: el script se abre con doble clic.')]
@@ -33,11 +33,99 @@ if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
 $HorasMinimas = 24                              # los temporales más nuevos que esto no se tocan
 $Local        = $env:LOCALAPPDATA
 $Unidad       = $env:SystemDrive.TrimEnd(':')   # normalmente C
+$NivelLog     = 'INFO'                          # log en la carpeta log\: DEBUG, INFO, WARN o ERROR (DEBUG anota cada archivo borrado: solo para revisar una falla)
+$PrefijoLog   = 'op-pc'                         # nombre de los archivos de log
 
 # Contadores del resumen final; los suma Remove-OldFile.
 # ($script: = variable compartida por todo el archivo, como un atributo de clase en Java)
 $script:TotalArchivos = 0
 $script:TotalBytes    = 0
+
+# ════════ LOG (idéntico en los 4 scripts: si lo cambias, cópialo igual en los demás) ════════
+
+# Un archivo por ejecución en la carpeta log\ junto al .ps1. Se guardan los de hoy y ayer, máximo
+# $LogPorDia por día. Si no se puede crear, el script sigue igual, solo que sin log.
+$LogPorDia  = 3    # archivos que se guardan por día
+$LogMaxMB   = 10   # al llegar a este tamaño se dejan de anotar las líneas DEBUG (las demás siguen)
+$Niveles    = @{ DEBUG = 0; INFO = 1; WARN = 2; ERROR = 3 }
+$script:ArchivoLog = $null   # no se llama $Log: en PowerShell $log y $Log son la misma variable
+
+# Abre el log de esta ejecución, anota el encabezado y borra los logs viejos.
+function Start-Log {
+    $script:LogInicio = Get-Date
+    $script:LogLleno  = $false
+    if ($Niveles.Keys -notcontains $NivelLog) {
+        Write-Line 'Log' "el nivel '$NivelLog' no existe; se usa INFO" -tipo 'aviso'
+        $script:NivelLog = 'INFO'
+    }
+    $carpeta = Join-Path $PSScriptRoot 'log'
+    try {
+        $null = New-Item $carpeta -ItemType Directory -Force -ErrorAction Stop
+        $ruta = Join-Path $carpeta ('{0}-{1:yyyy-MM-dd_HH-mm-ss}.log' -f $PrefijoLog, $script:LogInicio)
+        $script:ArchivoLog = New-Object IO.StreamWriter($ruta, $true, (New-Object Text.UTF8Encoding($true)))
+        $script:ArchivoLog.AutoFlush = $true   # cada línea queda en el disco aunque se cierre la ventana a mitad
+    } catch {
+        $script:ArchivoLog = $null
+        Write-Line 'Log' "no se pudo crear, se sigue sin log: $($_.Exception.Message)" -tipo 'aviso'
+        return
+    }
+    $os      = Get-CimInstance Win32_OperatingSystem
+    $version = Select-String -LiteralPath $PSCommandPath -Pattern '^\.VERSION (.+)' | Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value }
+    $admin   = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $esAdmin = if ($admin) { 'sí' } else { 'no' }
+    Write-LogLine INFO ('{0} {1} | admin: {2} | nivel: {3} | {4} {5} | PowerShell {6}' -f (Split-Path $PSCommandPath -Leaf), $version, $esAdmin, $NivelLog, $os.Caption, $os.Version, $PSVersionTable.PSVersion)
+    Remove-OldLog $carpeta
+}
+
+# Deja los logs de hoy y ayer, los $LogPorDia más nuevos de cada día. Solo toca archivos con el nombre exacto de un log.
+function Remove-OldLog($carpeta) {
+    $ayer   = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
+    $patron = '^{0}-(\d{{4}}-\d\d-\d\d)_\d\d-\d\d-\d\d\.log$' -f [regex]::Escape($PrefijoLog)
+    $porDia = Get-ChildItem -LiteralPath $carpeta -File | Where-Object Name -Match $patron | Group-Object { $_.Name -replace $patron, '$1' }
+    foreach ($dia in $porDia) {
+        $sobran = if ($dia.Name -lt $ayer) { $dia.Group } else { $dia.Group | Sort-Object Name -Descending | Select-Object -Skip $LogPorDia }
+        foreach ($archivo in $sobran) {
+            try   { Remove-Item -LiteralPath $archivo.FullName -ErrorAction Stop; Write-LogLine DEBUG "Log viejo borrado: $($archivo.Name)" }
+            catch { Write-LogLine DEBUG "Log viejo que no se pudo borrar: $($archivo.Name): $($_.Exception.Message)" }
+        }
+    }
+}
+
+# Anota una línea si su nivel llega a $NivelLog. La columna del medio es la cadena de funciones que
+# llevó hasta aquí (sin Main ni las de VISTA y LOG), para saber dónde pasó.
+function Write-LogLine($nivel, $texto) {
+    if (-not $script:ArchivoLog -or $Niveles[$nivel] -lt $Niveles[$NivelLog]) { return }
+    if ($nivel -eq 'DEBUG' -and $script:ArchivoLog.BaseStream.Length -ge $LogMaxMB * 1MB) {
+        if (-not $script:LogLleno) { $script:LogLleno = $true; Write-LogLine WARN "El log llegó a $LogMaxMB MB: ya no se anotan las líneas DEBUG" }
+        return
+    }
+    $cadena = @(Get-PSCallStack | Select-Object -Skip 1 -ExpandProperty FunctionName |
+        Where-Object { $_ -notmatch '^(Write-|Main$|<ScriptBlock>)' })
+    [array]::Reverse($cadena)
+    $donde = if ($cadena) { $cadena -join '>' } else { 'Main' }
+    $linea = '{0:yyyy-MM-dd HH:mm:ss.fff} [{1,-5}] {2} | {3}' -f (Get-Date), $nivel, $donde, ($texto -replace '\r?\n', ' ')
+    # Si escribir falla (por ejemplo, el disco se llenó), se deja de escribir el log y el script sigue.
+    try   { $script:ArchivoLog.WriteLine($linea) }
+    catch { $script:ArchivoLog = $null; Write-Line 'Log' "se dejó de escribir: $($_.Exception.Message)" -tipo 'aviso' }
+}
+
+# Nivel del log para cada tipo de la VISTA: aviso (amarillo) = WARN, mal (rojo) = ERROR, el resto INFO.
+function Get-LogLevel($tipo) {
+    switch ($tipo) { 'aviso' { 'WARN' } 'mal' { 'ERROR' } default { 'INFO' } }
+}
+
+# Al final: anota en DEBUG los errores de PowerShell que hubo (con su función y línea), cuánto duró, y cierra
+# el archivo. Main no va dentro de try: así un error sale en rojo y el script sigue, igual que sin log.
+# En DEBUG salen también los errores que el script ignora a propósito (temporales sin permiso, programas cerrados).
+function Stop-Log {
+    if (-not $script:ArchivoLog) { return }
+    $errores = @($Error)   # el más nuevo primero; PowerShell guarda máximo 256
+    [array]::Reverse($errores)
+    foreach ($e in $errores) { Write-LogLine DEBUG ('Error de PowerShell: {0} | {1}' -f $e.Exception.Message, ($e.ScriptStackTrace -replace '\r?\n', ' <- ')) }
+    Write-LogLine INFO ('Fin ({0:N0} s)' -f ((Get-Date) - $script:LogInicio).TotalSeconds)
+    try { $script:ArchivoLog.Dispose() } catch { Write-Verbose "No se pudo cerrar el log: $_" }
+    $script:ArchivoLog = $null
+}
 
 # ════════ VISTA (todo lo visual está aquí: colores, títulos y barras) ════════
 
@@ -59,12 +147,15 @@ function Write-Title($texto) {
     Write-Host ''
     Write-Host "   $texto" -ForegroundColor Cyan
     Write-Host ('   ' + '─' * 58) -ForegroundColor DarkGray
+    Write-LogLine INFO "=== $texto ==="
 }
 
 # Una línea del reporte: qué se hizo a la izquierda, resultado a la derecha con el color de su tipo.
+# También va al log, con el nivel que corresponde a su tipo.
 function Write-Line($nombre, $resultado, $tipo = 'normal') {
     Write-Host ('   {0,-32} ' -f $nombre) -NoNewline   # el espacio final separa aunque el nombre sea largo
     Write-Host $resultado -ForegroundColor $Colores[$tipo]
+    Write-LogLine (Get-LogLevel $tipo) ((@("$nombre".Trim(), "$resultado") -ne '') -join ': ')
 }
 
 # Barra de uso: verde, amarilla desde 80 % y roja desde 90 %.
@@ -75,6 +166,7 @@ function Write-Bar($nombre, $pct, $detalle) {
     Write-Host ('█' * $llenos) -ForegroundColor $Colores[$tipo] -NoNewline
     Write-Host ('░' * (30 - $llenos)) -ForegroundColor DarkGray -NoNewline
     Write-Host (' {0,3:N0} %   {1}' -f $pct, $detalle)
+    Write-LogLine INFO ('{0}: {1:N0} %, {2}' -f $nombre, $pct, $detalle)
 }
 
 # ════════ MÉTODOS REUTILIZABLES ════════
@@ -87,6 +179,7 @@ function Remove-OldFile($nombre, $rutas, $horas = 0) {
     $viejos = @(Get-Item $rutas -Force -ErrorAction SilentlyContinue |
         Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue |
         Where-Object LastWriteTime -lt $limite)
+    Write-LogLine DEBUG ('Busca en {0} lo anterior a {1:yyyy-MM-dd HH:mm}: {2} elementos' -f ($rutas -join '; '), $limite, $viejos.Count)
     $archivos = 0
     $bytes = 0
     $enUso = 0
@@ -95,7 +188,11 @@ function Remove-OldFile($nombre, $rutas, $horas = 0) {
             Remove-Item -LiteralPath $archivo.FullName -Force -ErrorAction Stop
             $archivos++
             $bytes += $archivo.Length
-        } catch { $enUso++ }
+            Write-LogLine DEBUG ('Borrado {0} ({1:N1} KB)' -f $archivo.FullName, ($archivo.Length / 1KB))
+        } catch {
+            $enUso++
+            Write-LogLine DEBUG "No se pudo borrar $($archivo.FullName): $($_.Exception.Message)"
+        }
     }
     Remove-EmptyFolder $viejos
     $script:TotalArchivos += $archivos
@@ -110,7 +207,10 @@ function Remove-OldFile($nombre, $rutas, $horas = 0) {
 function Remove-EmptyFolder($items) {
     $items | Where-Object { $_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
         Sort-Object { $_.FullName.Length } -Descending |
-        ForEach-Object { try { $_.Delete() } catch { Write-Verbose "Se deja: $_" } }   # Delete() sin $true falla solo si no está vacía
+        ForEach-Object {
+            $carpeta = $_   # dentro del catch, $_ ya es el error
+            try { $carpeta.Delete() } catch { Write-LogLine DEBUG "Carpeta que se deja: $($carpeta.FullName)" }   # Delete() sin $true falla solo si no está vacía
+        }
 }
 
 # Borra la caché de un programa solo si está instalado y cerrado.
@@ -129,6 +229,7 @@ function Get-ChromiumCachePath($datosUsuario) {
 # Ejecuta una herramienta de Windows, espera a que termine y reporta si salió bien.
 function Invoke-Tool($nombre, $programa, $argumentos) {
     Write-Line $nombre 'ejecutando...' -tipo 'info'
+    Write-LogLine DEBUG "Comando: $programa $argumentos"
     $proceso = Start-Process $programa $argumentos -Wait -PassThru -NoNewWindow
     if ($proceso.ExitCode -eq 0) { Write-Line $nombre 'OK' -tipo 'ok' }
     else                         { Write-Line $nombre "terminó con código $($proceso.ExitCode)" -tipo 'mal' }
@@ -295,7 +396,10 @@ function Set-DiskCleanupOption {
         try {
             $null = New-ItemProperty -LiteralPath $opcion.PSPath -Name StateFlags0001 -Value $valor -PropertyType DWord -Force -ErrorAction Stop
             if ($valor) { $marcadas++ }
-        } catch { $fallidas++ }
+        } catch {
+            $fallidas++
+            Write-LogLine DEBUG "Sin permiso en $($opcion.PSChildName): $($_.Exception.Message)"
+        }
     }
     $texto = "$marcadas marcadas (todas menos Descargas)"
     if ($fallidas) { $texto += " · $fallidas sin permiso" }
@@ -311,6 +415,7 @@ function Invoke-DiskCleanup {
     Write-Line 'Liberador de espacio' 'ejecutando...' -tipo 'info'
     $libreAntes = Get-FreeSpaceMB
     $reloj = [Diagnostics.Stopwatch]::StartNew()
+    Write-LogLine DEBUG 'Comando: cleanmgr.exe /sagerun:1'
     Start-Process cleanmgr.exe '/sagerun:1'
     $limite = (Get-Date).AddMinutes(3)
     do { Start-Sleep -Seconds 2 } while ((Get-Process -Name cleanmgr -ErrorAction SilentlyContinue) -and (Get-Date) -lt $limite)
@@ -356,7 +461,9 @@ function Clear-RecentFile {
 # Repara archivos de Windows dañados: DISM arregla el almacén de componentes (WinSxS) y luego sfc usa
 # ese almacén sano para reponer los archivos del sistema. Tarda varios minutos; por eso Main pregunta al inicio.
 function Confirm-WindowsRepair {
-    (Read-Host '   ¿Reparar también archivos de Windows (DISM y sfc)? Tarda varios minutos (S/N)') -match '^\s*s'
+    $respuesta = Read-Host '   ¿Reparar también archivos de Windows (DISM y sfc)? Tarda varios minutos (S/N)'
+    Write-LogLine INFO "Reparar Windows: respondió '$respuesta'"
+    $respuesta -match '^\s*s'
 }
 
 function Repair-Windows {
@@ -383,6 +490,7 @@ function Optimize-Disk {
 
 function Main {
     Write-Header 'OPTIMIZAR PC'
+    Start-Log
 
     # 1. Primero: ¿con qué permisos corre? Eso decide qué se puede hacer.
     $esAdmin = Test-Admin
@@ -440,4 +548,6 @@ function Main {
     Write-Title 'Listo'
 }
 
+# Sin try a propósito: si algo falla sale en rojo y el resto sigue, igual que antes. Stop-Log cierra el log.
 Main
+Stop-Log
