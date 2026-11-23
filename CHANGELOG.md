@@ -12,6 +12,7 @@ En el `.RELEASENOTES` de cada `.ps1` solo está la nota de su versión actual. A
 
 ## Monitor-Memoria
 
+- **1.1.2** (2026-11-22): el log ya no copia las 4 líneas de instrucciones de la ventana; empieza con el encabezado y solo anota eventos. El monitor hace lo mismo.
 - **1.1.1** (2026-11-22): en el log, la columna de la función ya no muestra comandos de Windows a mitad de camino (por ejemplo `Get-PhysicalDisk<Process>`), solo las funciones del script. El script hace lo mismo.
 - **1.1.0** (2026-11-22): deja un log en la carpeta log\ solo con lo importante: el inicio, cada limpieza (manual o automática) con lo que liberó, cuando se activa o desactiva la limpieza automática, los errores y el fin. Nunca anota cada lectura de la RAM.
 - **1.0.2** (2026-11-19): sin avisos de PSScriptAnalyzer (argumentos con nombre, el catch vacío ahora deja nota, Write-Host y -WhatIf marcados como intencionales). El script hace lo mismo.

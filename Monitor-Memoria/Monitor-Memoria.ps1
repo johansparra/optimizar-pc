@@ -1,10 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.1.1
+.VERSION 1.1.2
 .GUID 4b276250-ee71-40e3-9732-65f50b5d5cb3
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.1.1 (2026-11-22): en el log, la columna de la función ya no muestra comandos de Windows a mitad de camino (por ejemplo Get-PhysicalDisk<Process>), solo las funciones del script. El script hace lo mismo.
+1.1.2 (2026-11-22): el log ya no copia las 4 líneas de instrucciones de la ventana; empieza con el encabezado y solo anota eventos. El monitor hace lo mismo.
 #>
 
 <#
@@ -319,12 +319,13 @@ function Main {
 
     # 4. Explicar en esta ventana cómo se usa, y esperar hasta que elijan Salir.
     Write-Header 'MONITOR DE MEMORIA'
-    Start-Log
-    Write-LogLine INFO ('Limpieza automática al iniciar: ' + $(if ($ItemAuto.Checked) { 'activada' } else { 'desactivada' }))
     Write-Line 'Estado' 'activo: mira el ícono junto al reloj' -tipo 'ok'
     Write-Line 'Liberar memoria' 'doble clic en el ícono'
     Write-Line 'Más opciones' 'clic derecho en el ícono (limpieza automática, Salir...)'
     Write-Line 'Esta ventana' 'déjala minimizada; si la cierras, el monitor se cierra' -tipo 'info'
+    # El log empieza después de las instrucciones de arriba: solo anota eventos.
+    Start-Log
+    Write-LogLine INFO ('Limpieza automática al iniciar: ' + $(if ($ItemAuto.Checked) { 'activada' } else { 'desactivada' }))
     [System.Windows.Forms.Application]::Run()
     $Candado.ReleaseMutex()
 }
