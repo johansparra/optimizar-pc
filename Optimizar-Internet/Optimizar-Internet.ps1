@@ -1,10 +1,10 @@
 ﻿<#PSScriptInfo
-.VERSION 1.2.1
+.VERSION 1.2.2
 .GUID 5a4e60f0-e762-43fe-b7e2-b4af84d52483
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.2.1 (2026-11-22): en el log, la columna de la función ya no muestra comandos de Windows a mitad de camino (por ejemplo Get-PhysicalDisk<Process>), solo las funciones del script. El script hace lo mismo.
+1.2.2 (2026-11-22): como administrador, fijar el DNS ya no tarda unos 22 s con VPN: netsh guarda los servidores sin probarlos antes (validate=no). Queda el mismo DNS.
 #>
 
 <#
@@ -334,10 +334,11 @@ function Disable-Teredo {
 }
 
 # DNS fijo en el adaptador de CONFIGURACIÓN ($AdaptadorDns, $DnsPrimario, $DnsSecundario).
+# validate=no: sin eso netsh prueba cada servidor antes de guardarlo y con VPN tardaba unos 22 s.
 function Set-StaticDnsServer {
     Invoke-CmdLine "DNS fijo en $AdaptadorDns" @(
-        ('netsh interface ip set dns name="{0}" static {1}' -f $AdaptadorDns, $DnsPrimario)
-        ('netsh interface ip add dns name="{0}" {1} index=2' -f $AdaptadorDns, $DnsSecundario)
+        ('netsh interface ip set dns name="{0}" static {1} validate=no' -f $AdaptadorDns, $DnsPrimario)
+        ('netsh interface ip add dns name="{0}" {1} index=2 validate=no' -f $AdaptadorDns, $DnsSecundario)
     )
 }
 
