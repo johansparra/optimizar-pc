@@ -1,15 +1,15 @@
 ﻿<#PSScriptInfo
-.VERSION 1.4.1
+.VERSION 1.5.0
 .GUID 81b2e606-23df-4e75-8725-5df78a0609fc
 .AUTHOR johansparra
 .PROJECTURI https://github.com/johansparra/optimizar-pc
 .RELEASENOTES
-1.4.1 (2026-11-22): en el log, la columna de la función ya no muestra comandos de Windows a mitad de camino (por ejemplo Get-PhysicalDisk<Process>), solo las funciones del script. El script hace lo mismo.
+1.5.0 (2026-11-22): la revisión del equipo muestra el plan de energía activo (solo consulta, sin administrador) y avisa en amarillo si es "Economizador", que hace ir lento el equipo.
 #>
 
 <#
 .SYNOPSIS
-Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo (espacio, salud de discos y batería).
+Borra temporales y cachés de tu usuario, reporta qué borró y revisa el equipo (espacio, salud de discos, batería y plan de energía).
 .DESCRIPTION
 Doble clic en Optimizar-PC.bat: limpieza. Clic derecho > Ejecutar como administrador: limpieza + mantenimiento de Windows. Cada ejecución deja un log en la carpeta log\.
 .NOTES
@@ -308,6 +308,20 @@ function Show-Battery {
     Write-Line 'Salud de la batería' "$salud % de la capacidad original" -tipo $tipo
 }
 
+# Plan de energía activo (solo consulta, no pide admin). Con "Economizador" Windows frena el procesador y el
+# equipo va lento. Se reconoce por su GUID, que es el mismo en Windows de cualquier idioma.
+function Show-PowerPlan {
+    $activo = powercfg /getactivescheme | Select-String '([0-9a-f-]{36})\s+\((.+)\)' | Select-Object -First 1
+    if (-not $activo) { Write-Line 'Plan de energía' 'no se pudo consultar' -tipo 'info'; return }
+    $guid   = $activo.Matches[0].Groups[1].Value
+    $nombre = $activo.Matches[0].Groups[2].Value
+    if ($guid -eq 'a1841308-3541-4fab-bc81-f71556f20b4a') {
+        Write-Line 'Plan de energía' ('{0}: el equipo va más lento (cámbialo en Panel de control > Opciones de energía)' -f $nombre) -tipo 'aviso'
+    } else {
+        Write-Line 'Plan de energía' $nombre -tipo 'ok'
+    }
+}
+
 function Show-DaysSinceRestart {
     $dias = ((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).Days
     if ($dias -ge 7) { Write-Line 'Días sin reiniciar' "$dias (reinicia con Inicio > Reiniciar)" -tipo 'aviso' }
@@ -541,6 +555,7 @@ function Main {
     Show-DiskHealth
     Show-Trim
     Show-Battery
+    Show-PowerPlan
     Show-DaysSinceRestart
     Show-PendingRestart
     Show-StartupProgram
